@@ -1,0 +1,107 @@
+{
+  "title": "CET-6 Section A Simulation — Interactive Museum Exhibition",
+  "audio_file": "cet6_exam.wav",
+  "timing": {
+    "speech_rate": 1.0,
+    "pre_question_read_sec": 8.0,
+    "post_question_answer_sec": 8.0,
+    "turn_gap_sec": 0.25,
+    "enable_ding_chime": true
+  },
+  "dialogue": [
+    {
+      "role": "M",
+      "display_text": "Hi Claire, I just reviewed the preliminary floor plan for next month's maritime history exhibition. The interactive ship navigation simulator looks impressive, though I'm worried it might bottleneck visitor traffic near the main entrance.",
+      "spoken_text": "Hi Claire, I just reviewed the preliminary floor plan for next month's maritime history exhibition. The interactive ship navigation simulator looks impressive, though I'm worried it might bottleneck visitor traffic near the main entrance."
+    },
+    {
+      "role": "F",
+      "display_text": "Good point, David. We actually noticed that during yesterday's walkthrough. Instead of placing it right by the ticket counter, we're moving the simulator to the West Gallery, which has nearly 40% more open floor space.",
+      "spoken_text": "Good point, David. We actually noticed that during yesterday's walkthrough. Instead of placing it right by the ticket counter, we're moving the simulator to the West Gallery, which has nearly forty percent more open floor space."
+    },
+    {
+      "role": "M",
+      "display_text": "That makes a lot more sense. What about the audio guide system? Last year's handheld devices had a 15% failure rate, and visitors complained they were too heavy to carry around for two hours.",
+      "spoken_text": "That makes a lot more sense. What about the audio guide system? Last year's handheld devices had a fifteen percent failure rate, and visitors complained they were too heavy to carry around for two hours."
+    },
+    {
+      "role": "F",
+      "display_text": "Well... we decided to phase those out completely. Visitors can simply scan QR codes next to each display case with their own smartphones to stream commentary in six languages, plus we'll offer free high-speed Wi-Fi throughout the building.",
+      "spoken_text": "Well... we decided to phase those out completely. Visitors can simply scan Q R codes next to each display case with their own smartphones to stream commentary in six languages, plus we'll offer free high-speed Wi-Fi throughout the building."
+    },
+    {
+      "role": "M",
+      "display_text": "Brilliant! That cuts hardware maintenance costs too. Still, what about older guests or school groups who don't have smartphones with them?",
+      "spoken_text": "Brilliant! That cuts hardware maintenance costs too. Still, what about older guests or school groups who don't have smartphones with them?"
+    },
+    {
+      "role": "F",
+      "display_text": "We've kept a reserve of 50 lightweight tablets at the information desk that guests can borrow for free -- they just need to leave a refundable $20 deposit or a valid ID card.",
+      "spoken_text": "We've kept a reserve of fifty lightweight tablets at the information desk that guests can borrow for free -- they just need to leave a refundable twenty-dollar deposit or a valid I D card."
+    },
+    {
+      "role": "M",
+      "display_text": "Sounds like you've thought of everything. Have the artifact labels been sent to the print shop yet?",
+      "spoken_text": "Sounds like you've thought of everything. Have the artifact labels been sent to the print shop yet?"
+    },
+    {
+      "role": "F",
+      "display_text": "Almost. Our historian is double-checking the radiocarbon dates on three ancient compasses from the 1400s, and I'll upload the final print files before 5:00 PM today.",
+      "spoken_text": "Almost. Our historian is double-checking the radiocarbon dates on three ancient compasses from the fourteen hundreds, and I'll upload the final print files before five P M today."
+    }
+  ],
+  "questions": [
+    {
+      "id": 1,
+      "display_text": "Why did the woman decide to relocate the ship navigation simulator?",
+      "spoken_text": "Why did the woman decide to relocate the ship navigation simulator?",
+      "options": {
+        "A": "To make room for a larger ticket counter.",
+        "B": "To avoid blocking visitor flow near the entrance.",
+        "C": "To keep it away from fragile maritime artifacts.",
+        "D": "To take advantage of better lighting in the West Gallery."
+      },
+      "answer": "B",
+      "explanation": "男方担心模拟器放在主入口附近会造成人流拥堵（bottleneck visitor traffic near the main entrance），女方随即表示认同并决定将其移至空间宽敞 40% 的西展厅。"
+    },
+    {
+      "id": 2,
+      "display_text": "How will most visitors access the exhibition commentary?",
+      "spoken_text": "How will most visitors access the exhibition commentary?",
+      "options": {
+        "A": "By renting upgraded handheld audio players.",
+        "B": "By downloading an offline guide before arriving.",
+        "C": "By scanning codes on their personal phones.",
+        "D": "By following scheduled volunteer tour guides."
+      },
+      "answer": "C",
+      "explanation": "女方提到已彻底淘汰旧款手持设备，观众只需用自己的智能手机扫描展柜旁的二维码（scan QR codes... with their own smartphones）即可收听六种语言的讲解。"
+    },
+    {
+      "id": 3,
+      "display_text": "What does the museum provide for visitors without smartphones?",
+      "spoken_text": "What does the museum provide for visitors without smartphones?",
+      "options": {
+        "A": "Printed guidebooks sold at a discount.",
+        "B": "Shared listening stations beside each showcase.",
+        "C": "Free loaner tablets with a refundable deposit or ID.",
+        "D": "Guided group tours departing every half hour."
+      },
+      "answer": "C",
+      "explanation": "针对没有智能手机的老年观众或学生团体，女方说明服务台备有 50 台免费借用的平板电脑，只需留下可退还的 20 美元押金或有效身份证件即可（leave a refundable $20 deposit or a valid ID card）。"
+    },
+    {
+      "id": 4,
+      "display_text": "What is the woman going to do later today?",
+      "spoken_text": "What is the woman going to do later today?",
+      "options": {
+        "A": "Submit the finalized label files for printing.",
+        "B": "Test the radiocarbon dating equipment.",
+        "C": "Order fifty additional tablets for school groups.",
+        "D": "Conduct another walkthrough of the West Gallery."
+      },
+      "answer": "A",
+      "explanation": "对话结尾女方表示历史学家正在最后核对三件 15 世纪古罗盘的碳十四测年数据，她将在今天下午五点前上传最终打印文件（upload the final print files before 5:00 PM today）。"
+    }
+  ]
+}

@@ -1,0 +1,99 @@
+{
+  "title": "CET-6 Section A Simulation — Urban Vertical Farming",
+  "dialogue": [
+    {
+      "role": "M",
+      "display_text": "Hey Sarah, I just read your proposal for the campus sustainability grant. Converting the old warehouse into a vertical hydroponic farm is bold, but isn't the startup cost around $45,000?",
+      "spoken_text": "Hey Sarah, I just read your proposal for the campus sustainability grant. Converting the old warehouse into a vertical hydroponic farm is bold, but isn't the startup cost around forty-five thousand dollars?"
+    },
+    {
+      "role": "F",
+      "display_text": "It is, Mark. Actually, that figure initially made the committee hesitate. But if you factor in that we'll cut water usage by 90% compared to traditional gardening, the long-term savings are huge.",
+      "spoken_text": "It is, Mark. Actually, that figure initially made the committee hesitate. But if you factor in that we'll cut water usage by ninety percent compared to traditional gardening, the long-term savings are huge."
+    },
+    {
+      "role": "M",
+      "display_text": "True, water conservation is a major selling point. Still, LED grow lights run nearly 16 hours a day. Have you calculated how much that will add to the university's electricity bill?",
+      "spoken_text": "True, water conservation is a major selling point. Still, L E D grow lights run nearly sixteen hours a day. Have you calculated how much that will add to the university's electricity bill?"
+    },
+    {
+      "role": "F",
+      "display_text": "Well... that was my biggest headache last week. Fortunately, the engineering department agreed to let us tap into the solar panels installed on the roof back in 2024.",
+      "spoken_text": "Well... that was my biggest headache last week. Fortunately, the engineering department agreed to let us tap into the solar panels installed on the roof back in twenty twenty-four."
+    },
+    {
+      "role": "M",
+      "display_text": "Oh, smart move! That solves the power issue and builds cross-department support. So what crops are you planning to grow first?",
+      "spoken_text": "Oh, smart move! That solves the power issue and builds cross-department support. So what crops are you planning to grow first?"
+    },
+    {
+      "role": "F",
+      "display_text": "Mostly leafy greens and herbs -- things like lettuce, spinach, and basil. They grow fast and can go straight to the student cafeteria, cutting transport emissions to zero.",
+      "spoken_text": "Mostly leafy greens and herbs -- things like lettuce, spinach, and basil. They grow fast and can go straight to the student cafeteria, cutting transport emissions to zero."
+    },
+    {
+      "role": "M",
+      "display_text": "Sounds like a win-win. When do you present the revised budget to the review board?",
+      "spoken_text": "Sounds like a win-win. When do you present the revised budget to the review board?"
+    },
+    {
+      "role": "F",
+      "display_text": "Next Thursday afternoon. I'm actually heading to the lab now to run one final check on the nutrient circulation data.",
+      "spoken_text": "Next Thursday afternoon. I'm actually heading to the lab now to run one final check on the nutrient circulation data."
+    }
+  ],
+  "questions": [
+    {
+      "id": 1,
+      "display_text": "What initially caused the committee to hesitate about the woman's proposal?",
+      "spoken_text": "What initially caused the committee to hesitate about the woman's proposal?",
+      "options": {
+        "A": "The lack of space in the old warehouse.",
+        "B": "The high initial funding required to launch it.",
+        "C": "The potential shortage of student volunteers.",
+        "D": "The strict safety regulations on campus."
+      },
+      "answer": "B",
+      "explanation": "女方明确提到，最初让委员会犹豫的是高达 45,000 美元的启动资金（that figure initially made the committee hesitate）。"
+    },
+    {
+      "id": 2,
+      "display_text": "How does the woman plan to address the high electricity demand of the grow lights?",
+      "spoken_text": "How does the woman plan to address the high electricity demand of the grow lights?",
+      "options": {
+        "A": "By reducing the lighting duration to eight hours.",
+        "B": "By applying for an extra utility subsidy.",
+        "C": "By utilizing existing rooftop solar energy.",
+        "D": "By switching to natural sunlight during winter."
+      },
+      "answer": "C",
+      "explanation": "女方表示工程系同意让他们接入 2024 年安装在屋顶的太阳能电池板（tap into the solar panels installed on the roof）。"
+    },
+    {
+      "id": 3,
+      "display_text": "What advantage of growing leafy greens and herbs does the woman mention?",
+      "spoken_text": "What advantage of growing leafy greens and herbs does the woman mention?",
+      "options": {
+        "A": "They require minimal nutrient monitoring.",
+        "B": "They can be supplied directly to the campus dining hall.",
+        "C": "They sell at a higher price in local markets.",
+        "D": "They survive well without artificial lighting."
+      },
+      "answer": "B",
+      "explanation": "女方指出这些绿叶蔬菜和香草生长快，且能直接供应给学生食堂（go straight to the student cafeteria），实现零运输排放。"
+    },
+    {
+      "id": 4,
+      "display_text": "What is the woman going to do right after the conversation?",
+      "spoken_text": "What is the woman going to do right after the conversation?",
+      "options": {
+        "A": "Submit the final budget to the review board.",
+        "B": "Meet with professors from the engineering department.",
+        "C": "Inspect the rooftop solar panel connections.",
+        "D": "Verify the nutrient circulation figures in the lab."
+      },
+      "answer": "D",
+      "explanation": "对话结尾女方提到正准备去实验室对营养液循环数据进行最后一次核查（heading to the lab now to run one final check on the nutrient circulation data）。"
+    }
+  ]
+}

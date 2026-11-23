@@ -1,0 +1,13 @@
+# 忽略本地便携式 Python 环境（核心）
+Python/
+
+# 忽略运行时缓存与临时文件
+cache/
+__pycache__/
+*.pyc
+*.log
+
+# 如果 voices 文件夹内有超过 100MB 的模型权重，取消对应后缀的注释
+# voices/*.onnx
+# voices/*.pth
+# voices/*.bin
