@@ -63,7 +63,7 @@ from kokoro_studio.config import (
 from kokoro_studio.http_server import HttpServerThread
 from kokoro_studio.text_engine import (
     build_timeline_segments,
-    clean_annotated_for_tts,
+    detect_is_pure_phonetic_input,
     parse_learning_material,
     sanitize_text,
     split_into_sentences,
@@ -200,7 +200,12 @@ class CyberTtsPlayer(QWidget):
         except Exception:
             return
 
-        letter_pattern = r"[^\W\d_]" if self.is_phonetic_mode() else r"[a-zA-Z]"
+        will_be_phonetic = (
+            detect_is_pure_phonetic_input(raw_text)
+            if self.is_auto_ipa_enabled()
+            else self.is_phonetic_mode()
+        )
+        letter_pattern = r"[^\W\d_]" if will_be_phonetic else r"[a-zA-Z]"
         if not raw_text or not re.search(letter_pattern, raw_text):
             return
 
@@ -268,6 +273,9 @@ class CyberTtsPlayer(QWidget):
     def is_phonetic_mode(self) -> bool:
         return hasattr(self, "btn_phonetic_mode") and self.btn_phonetic_mode.isChecked()
 
+    def is_auto_ipa_enabled(self) -> bool:
+        return hasattr(self, "btn_auto_ipa") and self.btn_auto_ipa.isChecked()
+
     # ---------------------------------------------------------------------
     # UI Layout Construction
     # ---------------------------------------------------------------------
@@ -299,13 +307,27 @@ class CyberTtsPlayer(QWidget):
         self.btn_phonetic_mode = QPushButton("IPA: OFF")
         self.btn_phonetic_mode.setObjectName("btnPhoneticMode")
         self.btn_phonetic_mode.setCheckable(True)
+        self.btn_phonetic_mode.setChecked(False)
         self.btn_phonetic_mode.setFocusPolicy(Qt.NoFocus)
         self.btn_phonetic_mode.setToolTip(
-            "Phonetic Reading Mode: OFF (Normal English Text)\n"
-            "Click to switch to IPA Phoneme Mode (auto-converts dictionary IPA to Kokoro phonemes)"
+            "Phonetic Reading Mode: OFF (Normal English + Inline [IPA] Support)\n"
+            "Click to switch to Full IPA Phoneme Mode"
         )
         self.btn_phonetic_mode.toggled.connect(self.on_phonetic_mode_toggled)
         top_bar.addWidget(self.btn_phonetic_mode)
+
+        self.btn_auto_ipa = QPushButton("Auto: OFF")
+        self.btn_auto_ipa.setObjectName("btnAutoIpa")
+        self.btn_auto_ipa.setCheckable(True)
+        self.btn_auto_ipa.setChecked(False)
+        self.btn_auto_ipa.setFocusPolicy(Qt.NoFocus)
+        self.btn_auto_ipa.setToolTip(
+            "Auto-Detect IPA Mode: OFF\n"
+            "When ON: Text starting with '[' or '\\'' switches to IPA: ON;\n"
+            "Normal sentences (including inline [IPA] annotations) use IPA: OFF"
+        )
+        self.btn_auto_ipa.toggled.connect(self.on_auto_ipa_toggled)
+        top_bar.addWidget(self.btn_auto_ipa)
 
         self.btn_exit_loop = QPushButton("🔁 Single-Sentence Loop (Click or Esc to Exit)")
         self.btn_exit_loop.setObjectName("btnExitLoop")
@@ -377,7 +399,7 @@ class CyberTtsPlayer(QWidget):
         self.text_edit = CyberTextEdit(self)
         self.text_edit.setPlaceholderText(
             "Paste English dialogue, annotated study guides, or trap tables here...\n"
-            "• Supports W:/M: dual voices, **stress**, (silent), [phonetic], ‿ linking, and / pauses\n"
+            "• Supports W:/M: dual voices, **stress**, (silent), inline word [IPA], ‿ linking, and / pauses\n"
             "• Double-click any sentence to loop it; select any phrase + Alt+P to drill-read"
         )
         self.text_edit.textChanged.connect(self.on_text_changed)
@@ -729,7 +751,7 @@ class CyberTtsPlayer(QWidget):
         root_layout.addWidget(self.container)
 
     # ---------------------------------------------------------------------
-    # Phonetic Reading Mode Toggle
+    # Phonetic Reading Mode & Auto-Detect Toggles
     # ---------------------------------------------------------------------
     def on_phonetic_mode_toggled(self, checked: bool):
         if checked:
@@ -746,17 +768,36 @@ class CyberTtsPlayer(QWidget):
         else:
             self.btn_phonetic_mode.setText("IPA: OFF")
             self.btn_phonetic_mode.setToolTip(
-                "Phonetic Reading Mode: OFF (Normal English Text)\n"
-                "Click to switch to IPA Phoneme Mode (auto-converts dictionary IPA to Kokoro phonemes)"
+                "Phonetic Reading Mode: OFF (Normal English + Inline [IPA] Support)\n"
+                "Click to switch to Full IPA Phoneme Mode"
             )
             self.text_edit.setPlaceholderText(
                 "Paste English dialogue, annotated study guides, or trap tables here...\n"
-                "• Supports W:/M: dual voices, **stress**, (silent), [phonetic], ‿ linking, and / pauses\n"
+                "• Supports W:/M: dual voices, **stress**, (silent), inline word [IPA], ‿ linking, and / pauses\n"
                 "• Double-click any sentence to loop it; select any phrase + Alt+P to drill-read"
             )
 
         self.on_text_changed()
-        self.save_user_preferences()
+
+    def on_auto_ipa_toggled(self, checked: bool):
+        if checked:
+            self.btn_auto_ipa.setText("✨ Auto: ON")
+            self.btn_auto_ipa.setToolTip(
+                "Auto-Detect IPA Mode: ON\n"
+                "• Starts with '[' or '\\'' -> Switches to IPA: ON\n"
+                "• Normal text (including inline [IPA] annotations) -> Uses IPA: OFF"
+            )
+            current_text = self.text_edit.toPlainText().strip()
+            if current_text:
+                self.btn_phonetic_mode.setChecked(
+                    detect_is_pure_phonetic_input(current_text)
+                )
+        else:
+            self.btn_auto_ipa.setText("Auto: OFF")
+            self.btn_auto_ipa.setToolTip(
+                "Auto-Detect IPA Mode: OFF\n"
+                "Click to enable automatic IPA mode detection when pasting text"
+            )
 
     # ---------------------------------------------------------------------
     # Adjustable Transparency & Light/Dark Glass Theme Handlers
@@ -816,6 +857,11 @@ class CyberTtsPlayer(QWidget):
     def ingest_learning_text(
         self, raw_payload, auto_play=False, target_loops=None, progressive=False
     ):
+        if self.is_auto_ipa_enabled():
+            detected_ipa = detect_is_pure_phonetic_input(raw_payload)
+            if self.btn_phonetic_mode.isChecked() != detected_ipa:
+                self.btn_phonetic_mode.setChecked(detected_ipa)
+
         if self.is_phonetic_mode():
             if isinstance(raw_payload, dict):
                 raw_str = raw_payload.get("dialogue") or raw_payload.get("text") or ""
@@ -881,13 +927,14 @@ class CyberTtsPlayer(QWidget):
         self.lbl_drill_count.setText(str(len(drills)))
 
         for idx, d in enumerate(drills):
+            tts_target = d.get("tts_phrase") or d["phrase"]
             card = DrillCardItem(
                 index=idx + 1,
                 phrase=d["phrase"],
                 tip=d.get("tip", ""),
                 parent=self.drill_container,
             )
-            card.clicked.connect(self.play_drill_phrase)
+            card.clicked.connect(lambda _p, target=tts_target: self.play_drill_phrase(target))
             row = idx // 2
             col = idx % 2
             self.drill_grid.addWidget(card, row, col)
@@ -902,17 +949,16 @@ class CyberTtsPlayer(QWidget):
         self.left_splitter.setSizes([int(total_h * 0.62), int(total_h * 0.38)])
 
     def play_drill_phrase(self, phrase: str):
-        phonetic_mode = self.is_phonetic_mode()
-        clean_p = clean_annotated_for_tts(phrase, phonetic_mode=phonetic_mode)
-        if not clean_p:
+        if not phrase or not phrase.strip():
             return
         if self.is_playing:
             self.toggle_stop_or_resume()
 
+        phonetic_mode = self.is_phonetic_mode()
         voice_key = self.combo_voice.currentText().split(" ")[0]
         device = self.combo_device.currentData() or "cpu"
         self.drill_thread.play_phrase(
-            clean_p,
+            phrase,
             voice=voice_key,
             speed=0.85,
             device=device,
@@ -1188,7 +1234,6 @@ class CyberTtsPlayer(QWidget):
         if x < 0 or x > w or y < 0 or y > h:
             return None
 
-        # Generous 4-corner hit zones (top-left, top-right, bottom-left, bottom-right)
         in_corner_left = x <= CORNER_MARGIN
         in_corner_right = x >= w - CORNER_MARGIN
         in_corner_top = y <= CORNER_MARGIN
@@ -1203,7 +1248,6 @@ class CyberTtsPlayer(QWidget):
         if in_corner_right and in_corner_bottom:
             return "bottom-right"
 
-        # Straight edges
         if x <= EDGE_MARGIN:
             return "left"
         if x >= w - EDGE_MARGIN:
@@ -1726,7 +1770,7 @@ class CyberTtsPlayer(QWidget):
     # User Preferences Persistence
     # ---------------------------------------------------------------------
     def load_user_preferences(self):
-        # One-time migration to apply new defaults (30% transparency & Auto Clipboard mode)
+        # One-time migration to apply defaults (30% transparency & Auto Clipboard mode)
         if not self.settings.value("v3_2_defaults_migrated", False, type=bool):
             self.settings.setValue("win_transparency", 30)
             self.settings.setValue("work_mode", "auto_clipboard")
@@ -1748,9 +1792,11 @@ class CyberTtsPlayer(QWidget):
         else:
             self.splitter.setSizes([665, 275])
 
-        is_phonetic = self.settings.value("phonetic_mode", False, type=bool)
-        self.btn_phonetic_mode.setChecked(is_phonetic)
-        self.on_phonetic_mode_toggled(is_phonetic)
+        # Both IPA mode and Auto-Detect start OFF by default
+        self.btn_phonetic_mode.setChecked(False)
+        self.on_phonetic_mode_toggled(False)
+        self.btn_auto_ipa.setChecked(False)
+        self.on_auto_ipa_toggled(False)
 
         self.chk_split.setChecked(
             self.settings.value("sentence_split", False, type=bool)
@@ -1825,8 +1871,6 @@ class CyberTtsPlayer(QWidget):
             self.settings.setValue("win_height", self.height())
         if hasattr(self, "splitter"):
             self.settings.setValue("splitter_sizes", self.splitter.sizes())
-        if hasattr(self, "btn_phonetic_mode"):
-            self.settings.setValue("phonetic_mode", self.btn_phonetic_mode.isChecked())
         self.settings.setValue("sentence_split", self.chk_split.isChecked())
         if hasattr(self, "combo_mode"):
             self.settings.setValue("work_mode", self.combo_mode.currentData())

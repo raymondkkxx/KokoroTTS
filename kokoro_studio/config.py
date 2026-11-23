@@ -427,7 +427,7 @@ QPushButton#btnTopAction:hover {{
     background-color: {ctrl_hover};
     color: {text_main};
 }}
-QPushButton#btnPhoneticMode {{
+QPushButton#btnPhoneticMode, QPushButton#btnAutoIpa {{
     background-color: {ctrl_bg};
     color: {text_sub};
     font-size: 12px;
@@ -437,7 +437,7 @@ QPushButton#btnPhoneticMode {{
     padding: 3px 10px;
     font-family: {FONT_STACK};
 }}
-QPushButton#btnPhoneticMode:hover {{
+QPushButton#btnPhoneticMode:hover, QPushButton#btnAutoIpa:hover {{
     background-color: {ctrl_hover};
     color: {text_main};
 }}
@@ -448,6 +448,14 @@ QPushButton#btnPhoneticMode:checked {{
 }}
 QPushButton#btnPhoneticMode:checked:hover {{
     background-color: {PALETTE_ROSE_DEEP};
+}}
+QPushButton#btnAutoIpa:checked {{
+    background-color: {PALETTE_ORANGE};
+    color: #FFFFFF;
+    border: 1px solid {PALETTE_ORANGE};
+}}
+QPushButton#btnAutoIpa:checked:hover {{
+    background-color: {PALETTE_ORANGE_DEEP};
 }}
 QPushButton#btnSettingToggle {{
     background-color: {setting_btn_bg};

@@ -23,7 +23,7 @@ def resolve_voice_path(voice_key: str) -> str:
 def synthesize_chunk(
     pipeline, text: str, voice: str, speed: float, phonetic_mode: bool = False
 ):
-    """Run KPipeline either from converted Kokoro IPA tokens or standard G2P text."""
+    """Run KPipeline either from converted Kokoro IPA tokens or standard/inline-IPA text."""
     if phonetic_mode:
         if hasattr(pipeline, "generate_from_tokens"):
             return pipeline.generate_from_tokens(
@@ -248,7 +248,12 @@ class DrillSynthesizerThread(QThread):
         phonetic_mode: bool = False,
     ):
         self.phonetic_mode = phonetic_mode
-        self.phrase = clean_annotated_for_tts(phrase, phonetic_mode=phonetic_mode)
+        if re_already_inline := (not phonetic_mode and "](" in phrase and "/)" in phrase):
+            self.phrase = phrase
+        else:
+            self.phrase = clean_annotated_for_tts(
+                phrase, phonetic_mode=phonetic_mode, inline_phonetics=True
+            )
         self.voice = voice
         self.speed = speed
         self.device = device

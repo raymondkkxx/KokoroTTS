@@ -58,11 +58,39 @@ def detect_speaker(line: str):
     return speaker, line[m.end() :].strip()
 
 
+def detect_is_pure_phonetic_input(raw_input) -> bool:
+    """
+    Auto-detect whether pasted text starts as pure phonetic notation:
+    - True when the first effective character (after optional W:/M: prefix) is '[', "'", 'ˈ', 'ˌ', or '/'
+    - False otherwise (normal text, including sentences with inline [ipa] annotations handled by Plan B)
+    """
+    if isinstance(raw_input, dict):
+        text = str(raw_input.get("dialogue") or raw_input.get("text") or "").strip()
+    else:
+        text = str(raw_input or "").strip()
+
+    if not text:
+        return False
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or re.match(r"^-{3,}$", line):
+            continue
+        _, body = detect_speaker(line)
+        body = re.sub(r"^[\*\-\•]\s*", "", body).strip()
+        if not body:
+            continue
+        return body[0] in ("[", "'", "ˈ", "ˌ", "/")
+
+    return False
+
+
 def clean_phonetic_for_tts(text: str) -> str:
     """
     Convert standard dictionary IPA (e.g. [ˈhaʊdʒə ˈfiːləˌbaʊt]) into native
     Kokoro / Misaki phoneme tokens (e.g. hˈWʤə fˈiləbˌWt):
     - Strip speaker tags (W:, M:) and /.../ or [...] wrappers
+    - Normalize ASCII leading apostrophe ' to primary stress ˈ
     - Merge dictionary diphthongs into Misaki single-letter symbols (aʊ->W, aɪ->I, eɪ->A, ɔɪ->Y, oʊ->O, əʊ->Q)
     - Normalize affricates/consonants (tʃ->ʧ, dʒ->ʤ, g->ɡ, ər->ɚ, r->ɹ) and strip length marks (ː)
     - Shift syllable-initial stress markers (ˈ, ˌ) past onset consonants so they sit directly before the vowel
@@ -77,6 +105,9 @@ def clean_phonetic_for_tts(text: str) -> str:
 
     # Unwrap /phonemes/ and [phonemes] brackets without deleting inner IPA symbols
     t = t.replace("/", " ").replace("[", " ").replace("]", " ")
+
+    # Convert ASCII apostrophe stress (e.g. 'haʊdʒə) into IPA primary stress ˈ
+    t = re.sub(r"(?:^|(?<=\s))'(?=\S)", "ˈ", t)
 
     # Normalize tie bars and affricates
     t = t.replace("\u0361", "").replace("\u035c", "")
@@ -94,10 +125,10 @@ def clean_phonetic_for_tts(text: str) -> str:
     t = t.replace("ər", "ɚ").replace("ɜr", "ɚ").replace("ɜːr", "ɚ")
     t = t.replace("g", "ɡ").replace("r", "ɹ")
 
-    # Strip dictionary length markers (ː or colon after vowel) and mid-word syllable dots
+    # Strip dictionary length markers (ː or colon after vowel) and mid-word syllable dots/hyphens
     t = t.replace("ː", "")
     t = re.sub(r"(?<=[a-zæɑɒɔəɚɛɜɪʊʌɐAIOWYUQ]):", "", t)
-    t = re.sub(r"(?<=\S)\.(?=\S)", "", t)
+    t = re.sub(r"(?<=\S)[\.\-](?=\S)", "", t)
 
     # Filter CJK characters and CJK punctuation
     t = re.sub(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]", " ", t)
@@ -122,10 +153,26 @@ def clean_phonetic_for_tts(text: str) -> str:
     return t
 
 
-def clean_annotated_for_tts(text: str, phonetic_mode: bool = False) -> str:
+def _looks_like_ipa_bracket(content: str) -> bool:
+    """Check whether bracketed content represents phonetic notation rather than numeric/cite tags."""
+    s = content.strip()
+    if not s or s.lower().startswith("cite:"):
+        return False
+    if re.fullmatch(r"[\d\s,.\-]+", s):
+        return False
+    return bool(re.search(r"[^\W\d_]", s))
+
+
+def clean_annotated_for_tts(
+    text: str, phonetic_mode: bool = False, inline_phonetics: bool = False
+) -> str:
     """
-    Convert annotated learning text into pure, natural English for Kokoro TTS,
-    or convert & normalize IPA phonemes when phonetic_mode=True.
+    Convert annotated learning text into pure English for Kokoro TTS:
+    - When phonetic_mode=True: convert entire text as IPA phonemes.
+    - When phonetic_mode=False & inline_phonetics=True (Plan B): replace `word [ipa]`
+      with Kokoro's inline phonetic override `[word](/kokoro_ipa/)` while reading
+      surrounding text as normal English.
+    - When phonetic_mode=False & inline_phonetics=False: strip `[ipa]` for clean display/counts.
     """
     if not text:
         return ""
@@ -134,9 +181,6 @@ def clean_annotated_for_tts(text: str, phonetic_mode: bool = False) -> str:
         return clean_phonetic_for_tts(text)
 
     _, t = detect_speaker(text)
-
-    # Remove all bracketed annotations: [ði], [mə-ˈtɪ-kjə-ləs], etc.
-    t = re.sub(r"\[[^\]]*\]", "", t)
 
     # Unwrap weak-form glide parentheses: *(I)* -> I, *(to de)* -> to de
     t = re.sub(r"\*\(([^)]+)\)\*", r"\1", t)
@@ -147,13 +191,6 @@ def clean_annotated_for_tts(text: str, phonetic_mode: bool = False) -> str:
     # Remove bold/italic asterisks without inserting spaces inside words
     t = t.replace("**", "").replace("*", "")
 
-    # Convert linking arc '‿' to word boundary space
-    t = t.replace("‿", " ")
-
-    # Convert sense-group slash '/' to natural comma pause
-    t = re.sub(r"\s*/+\s*", ", ", t)
-    t = re.sub(r"([.!?,;:])\s*,", r"\1", t)
-
     # Filter CJK characters and CJK punctuation
     t = re.sub(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]", " ", t)
     t = re.sub(
@@ -162,7 +199,57 @@ def clean_annotated_for_tts(text: str, phonetic_mode: bool = False) -> str:
         t,
     )
 
-    # Clean remaining non-vocal symbols while keeping standard punctuation
+    # Convert sense-group slash '/' to natural comma pause
+    t = re.sub(r"\s*/+\s*", ", ", t)
+    t = re.sub(r"([.!?,;:])\s*,", r"\1", t)
+
+    if inline_phonetics:
+        # Plan B: Bind preceding word/linked-chunk + [ipa] into Kokoro `[phrase](/phonemes/)`
+        inline_tokens = []
+
+        def stash_word_ipa(match):
+            raw_phrase = match.group(1).replace("‿", " ").strip()
+            raw_ipa = match.group(2)
+            if not _looks_like_ipa_bracket(raw_ipa):
+                return raw_phrase
+            kokoro_ipa = clean_phonetic_for_tts(raw_ipa)
+            if not kokoro_ipa:
+                return raw_phrase
+            idx = len(inline_tokens)
+            inline_tokens.append(f"[{raw_phrase}](/{kokoro_ipa}/)")
+            return f" __IPATOK{idx}__ "
+
+        def stash_standalone_ipa(match):
+            raw_ipa = match.group(1)
+            if not _looks_like_ipa_bracket(raw_ipa):
+                return ""
+            kokoro_ipa = clean_phonetic_for_tts(raw_ipa)
+            if not kokoro_ipa:
+                return ""
+            idx = len(inline_tokens)
+            inline_tokens.append(f"[p](/{kokoro_ipa}/)")
+            return f" __IPATOK{idx}__ "
+
+        t = re.sub(
+            r"([A-Za-z0-9'’-]+(?:‿[A-Za-z0-9'’-]+)*)\s*\[([^\]]+)\]",
+            stash_word_ipa,
+            t,
+        )
+        t = re.sub(r"\[([^\]]+)\]", stash_standalone_ipa, t)
+        t = t.replace("‿", " ")
+        t = re.sub(r"[`~@#$%^&*()+=\|\\<>{}\[\]\t]+", " ", t)
+        t = re.sub(r"\s+([,.!?;:])", r"\1", t)
+        t = re.sub(r"[ ]{2,}", " ", t).strip()
+
+        for idx, tok in enumerate(inline_tokens):
+            t = t.replace(f"__IPATOK{idx}__", tok)
+        t = re.sub(r"\s+([,.!?;:])", r"\1", t)
+        t = re.sub(r"[ ]{2,}", " ", t).strip()
+        return t
+
+    # Display / word-count sanitization mode (strip brackets cleanly)
+    t = re.sub(r"\[[^\]]*\]", "", t)
+    t = t.replace("‿", " ")
     t = re.sub(r"[`~@#$%^&*()_+=\|\\<>{}\[\]\t]+", " ", t)
     t = re.sub(r"\s+([,.!?;:])", r"\1", t)
     t = re.sub(r"[ ]{2,}", " ", t).strip()
@@ -175,7 +262,9 @@ def sanitize_text(text: str, phonetic_mode: bool = False) -> str:
         return ""
     lines = []
     for line in text.splitlines():
-        cleaned = clean_annotated_for_tts(line, phonetic_mode=phonetic_mode)
+        cleaned = clean_annotated_for_tts(
+            line, phonetic_mode=phonetic_mode, inline_phonetics=False
+        )
         if cleaned:
             lines.append(cleaned)
     return "\n".join(lines).strip()
@@ -201,13 +290,18 @@ def parse_learning_material(raw_input) -> dict:
     """
     Parse raw text or JSON payload into:
       - display_text: cleaned markdown/annotated lines for rich display
-      - drills: list of {"phrase": str, "tip": str} for interactive 2-column Drill Cards
+      - drills: list of {"phrase": str, "tts_phrase": str, "tip": str} for interactive 2-column Drill Cards
     """
     drills = []
     seen_drills = set()
 
     def add_drill(phrase: str, tip: str = ""):
-        clean_p = clean_annotated_for_tts(phrase).strip(" ,.-:;")
+        clean_p = clean_annotated_for_tts(
+            phrase, phonetic_mode=False, inline_phonetics=False
+        ).strip(" ,.-:;")
+        tts_p = clean_annotated_for_tts(
+            phrase, phonetic_mode=False, inline_phonetics=True
+        ).strip(" ,.-:;")
         if not clean_p or not re.search(r"[a-zA-Z]", clean_p):
             return
         if len(clean_p) > 65:
@@ -216,7 +310,13 @@ def parse_learning_material(raw_input) -> dict:
         if key not in seen_drills:
             seen_drills.add(key)
             clean_tip = tip.replace("`", "").strip()
-            drills.append({"phrase": clean_p, "tip": clean_tip})
+            drills.append(
+                {
+                    "phrase": clean_p,
+                    "tts_phrase": tts_p or clean_p,
+                    "tip": clean_tip,
+                }
+            )
 
     # 1. Handle JSON payload if provided
     if isinstance(raw_input, dict):
@@ -297,7 +397,7 @@ def parse_learning_material(raw_input) -> dict:
     if len(drills) < 4 and dialogue_lines:
         for dline in dialogue_lines:
             for m in re.finditer(
-                r"(?:[A-Za-z\*\(\)]+‿[A-Za-z\*\(\)‿]+|[A-Za-z\*\(\)]+\s*\[[^\]]+\])",
+                r"(?:[A-Za-z\*\(\)]+‿[A-Za-z\*\(\)‿]+(?:\s*\[[^\]]+\])?|[A-Za-z\*\(\)]+\s*\[[^\]]+\])",
                 dline,
             ):
                 snippet = m.group(0)
@@ -440,7 +540,9 @@ def build_timeline_segments(visible_text: str, phonetic_mode: bool = False) -> l
                 end_pos = pos + len(sent)
                 search_cursor = end_pos
 
-                tts_clean = clean_annotated_for_tts(sent, phonetic_mode=phonetic_mode)
+                tts_clean = clean_annotated_for_tts(
+                    sent, phonetic_mode=phonetic_mode, inline_phonetics=True
+                )
                 if tts_clean and re.search(r"[^\W\d_]|[0-9]", tts_clean):
                     segments.append(
                         {
