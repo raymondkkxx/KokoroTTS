@@ -20,6 +20,19 @@ def resolve_voice_path(voice_key: str) -> str:
     return local_voice_path if os.path.exists(local_voice_path) else voice_key
 
 
+def synthesize_chunk(
+    pipeline, text: str, voice: str, speed: float, phonetic_mode: bool = False
+):
+    """Run KPipeline either from converted Kokoro IPA tokens or standard G2P text."""
+    if phonetic_mode:
+        if hasattr(pipeline, "generate_from_tokens"):
+            return pipeline.generate_from_tokens(
+                tokens=text, voice=voice, speed=speed
+            )
+        return pipeline(f"[p](/{text}/)", voice=voice, speed=speed)
+    return pipeline(text, voice=voice, speed=speed)
+
+
 class SharedKokoroEngine:
     """Thread-safe singleton wrapper around KPipeline to share VRAM/RAM across threads."""
 
@@ -69,6 +82,7 @@ class TtsSynthesizerThread(QThread):
         self.shadowing = False
         self.pause_sec = 1.5
         self.progressive = False
+        self.phonetic_mode = False
 
     def start_synth(
         self,
@@ -80,6 +94,7 @@ class TtsSynthesizerThread(QThread):
         pause_sec,
         device="cpu",
         progressive=False,
+        phonetic_mode=False,
     ):
         self.is_cancelled = False
         self.segments = segments
@@ -90,6 +105,7 @@ class TtsSynthesizerThread(QThread):
         self.pause_sec = pause_sec
         self.target_device = device
         self.progressive = progressive
+        self.phonetic_mode = phonetic_mode
         self.start()
 
     def cancel(self):
@@ -150,8 +166,12 @@ class TtsSynthesizerThread(QThread):
                         )
 
                         seg_audios = []
-                        generator = pipeline(
-                            seg["tts_text"], voice=voice_to_use, speed=pass_speed
+                        generator = synthesize_chunk(
+                            pipeline,
+                            seg["tts_text"],
+                            voice=voice_to_use,
+                            speed=pass_speed,
+                            phonetic_mode=self.phonetic_mode,
                         )
                         for _, _, audio in generator:
                             if self.is_cancelled:
@@ -217,11 +237,18 @@ class DrillSynthesizerThread(QThread):
         self.voice = "af_heart"
         self.speed = 0.85
         self.device = "cpu"
+        self.phonetic_mode = False
 
     def play_phrase(
-        self, phrase: str, voice: str, speed: float = 0.85, device: str = "cpu"
+        self,
+        phrase: str,
+        voice: str,
+        speed: float = 0.85,
+        device: str = "cpu",
+        phonetic_mode: bool = False,
     ):
-        self.phrase = clean_annotated_for_tts(phrase)
+        self.phonetic_mode = phonetic_mode
+        self.phrase = clean_annotated_for_tts(phrase, phonetic_mode=phonetic_mode)
         self.voice = voice
         self.speed = speed
         self.device = device
@@ -239,9 +266,14 @@ class DrillSynthesizerThread(QThread):
             chunks = []
             with shared_kokoro.lock:
                 pipeline = shared_kokoro.get_pipeline(target_lang, self.device)
-                for _, _, audio in pipeline(
-                    self.phrase, voice=actual_voice, speed=self.speed
-                ):
+                generator = synthesize_chunk(
+                    pipeline,
+                    self.phrase,
+                    voice=actual_voice,
+                    speed=self.speed,
+                    phonetic_mode=self.phonetic_mode,
+                )
+                for _, _, audio in generator:
                     if isinstance(audio, torch.Tensor):
                         chunks.append(audio.detach().cpu().numpy().astype(np.float32))
                     else:

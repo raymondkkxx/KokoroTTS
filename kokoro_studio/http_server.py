@@ -37,19 +37,19 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/mode":
-            mode_val = getattr(self.server, "current_mode_val", "1")
+            mode_val = getattr(self.server, "current_mode_val", "2")
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
             self.wfile.write(mode_val.encode("utf-8"))
         elif self.path == "/transparency":
-            t_val = getattr(self.server, "current_transparency_val", "0")
+            t_val = getattr(self.server, "current_transparency_val", "30")
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
             self.wfile.write(t_val.encode("utf-8"))
         elif self.path == "/opacity":
-            op_val = getattr(self.server, "current_opacity_val", "100")
+            op_val = getattr(self.server, "current_opacity_val", "70")
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
@@ -75,6 +75,8 @@ class HttpServerThread(QThread):
         self.mode_signal = mode_signal
         self.opacity_signal = opacity_signal
         self.server = None
+        self.init_mode_val = "2"
+        self.init_transparency_val = 30
 
     def run(self):
         try:
@@ -83,20 +85,23 @@ class HttpServerThread(QThread):
             self.server.text_received_signal = self.text_signal
             self.server.mode_change_signal = self.mode_signal
             self.server.opacity_change_signal = self.opacity_signal
-            self.server.current_mode_val = "1"
-            self.server.current_transparency_val = "0"
-            self.server.current_opacity_val = "100"
+            self.server.current_mode_val = str(self.init_mode_val)
+            t = max(0, min(95, int(self.init_transparency_val)))
+            self.server.current_transparency_val = str(t)
+            self.server.current_opacity_val = str(100 - t)
             self.server.serve_forever()
         except Exception as e:
             print("HTTP Server Notice:", e)
 
     def set_current_mode(self, mode_str: str):
+        self.init_mode_val = str(mode_str)
         if self.server:
             self.server.current_mode_val = str(mode_str)
 
     def set_current_transparency(self, transparency_pct: int):
+        t = max(0, min(95, int(transparency_pct)))
+        self.init_transparency_val = t
         if self.server:
-            t = max(0, min(95, int(transparency_pct)))
             self.server.current_transparency_val = str(t)
             self.server.current_opacity_val = str(100 - t)
 

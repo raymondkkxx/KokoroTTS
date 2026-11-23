@@ -48,6 +48,7 @@ import torch
 
 from kokoro_studio.config import (
     APP_ROOT_DIR,
+    CORNER_MARGIN,
     EDGE_MARGIN,
     PALETTE_BLACK,
     PALETTE_ORANGE,
@@ -96,12 +97,13 @@ class CyberTtsPlayer(QWidget):
         self.setMinimumSize(720, 520)
         self.resize(940, 650)
 
-        self.transparency = 0  # 0 = Crisp White Light Mode; 1~95 = Dark Glass Mode
+        self.transparency = 30  # Default 30% Dark Glass Mode
         self.drag_pos = QPoint()
         self.drag_edge = None
         self.drag_start_geo = QRect()
         self.drag_start_pos = QPoint()
         self.is_slider_dragging = False
+        self._override_cursor_shape = None
 
         self.click_count = 0
         self.last_click_time = 0.0
@@ -148,6 +150,11 @@ class CyberTtsPlayer(QWidget):
         self.init_clipboard_watcher()
         self.load_user_preferences()
 
+        # Global event filter ensures reliable 4-corner & edge window resizing over child widgets
+        app_inst = QApplication.instance()
+        if app_inst is not None:
+            app_inst.installEventFilter(self)
+
         self.ahk_text_signal.connect(self.on_ahk_text_received)
         self.mode_change_signal.connect(self.on_remote_mode_changed)
         self.opacity_change_signal.connect(self.on_remote_opacity_changed)
@@ -156,6 +163,10 @@ class CyberTtsPlayer(QWidget):
             self.mode_change_signal,
             self.opacity_change_signal,
         )
+        self.http_thread.set_current_mode(
+            "2" if self.combo_mode.currentData() == "auto_clipboard" else "1"
+        )
+        self.http_thread.set_current_transparency(self.transparency)
         self.http_thread.start()
 
     # ---------------------------------------------------------------------
@@ -189,7 +200,8 @@ class CyberTtsPlayer(QWidget):
         except Exception:
             return
 
-        if not raw_text or not re.search(r"[a-zA-Z]", raw_text):
+        letter_pattern = r"[^\W\d_]" if self.is_phonetic_mode() else r"[a-zA-Z]"
+        if not raw_text or not re.search(letter_pattern, raw_text):
             return
 
         if raw_text.strip() == self.last_clipboard_text:
@@ -253,6 +265,9 @@ class CyberTtsPlayer(QWidget):
     def is_progressive_index(self, index: int) -> bool:
         return index == 4
 
+    def is_phonetic_mode(self) -> bool:
+        return hasattr(self, "btn_phonetic_mode") and self.btn_phonetic_mode.isChecked()
+
     # ---------------------------------------------------------------------
     # UI Layout Construction
     # ---------------------------------------------------------------------
@@ -269,6 +284,7 @@ class CyberTtsPlayer(QWidget):
         self.container_shadow.setBlurRadius(28)
         self.container_shadow.setColor(QColor(24, 24, 27, 45))
         self.container_shadow.setOffset(0, 6)
+        self.container_shadow.setEnabled(self.transparency == 0)
         self.container.setGraphicsEffect(self.container_shadow)
 
         container_layout = QVBoxLayout(self.container)
@@ -278,6 +294,18 @@ class CyberTtsPlayer(QWidget):
         # Top Action Bar
         top_bar = QHBoxLayout()
         top_bar.setContentsMargins(2, 0, 2, 0)
+        top_bar.setSpacing(6)
+
+        self.btn_phonetic_mode = QPushButton("IPA: OFF")
+        self.btn_phonetic_mode.setObjectName("btnPhoneticMode")
+        self.btn_phonetic_mode.setCheckable(True)
+        self.btn_phonetic_mode.setFocusPolicy(Qt.NoFocus)
+        self.btn_phonetic_mode.setToolTip(
+            "Phonetic Reading Mode: OFF (Normal English Text)\n"
+            "Click to switch to IPA Phoneme Mode (auto-converts dictionary IPA to Kokoro phonemes)"
+        )
+        self.btn_phonetic_mode.toggled.connect(self.on_phonetic_mode_toggled)
+        top_bar.addWidget(self.btn_phonetic_mode)
 
         self.btn_exit_loop = QPushButton("🔁 Single-Sentence Loop (Click or Esc to Exit)")
         self.btn_exit_loop.setObjectName("btnExitLoop")
@@ -355,7 +383,6 @@ class CyberTtsPlayer(QWidget):
         self.text_edit.textChanged.connect(self.on_text_changed)
         self.text_edit.sentence_double_clicked.connect(self.on_sentence_double_clicked)
         self.text_edit.selection_read_requested.connect(self.play_drill_phrase)
-        self.text_edit.installEventFilter(self)
 
         # 2-Column Drill Cards Panel
         self.drill_frame = QFrame()
@@ -468,16 +495,17 @@ class CyberTtsPlayer(QWidget):
         right_layout.setContentsMargins(15, 15, 15, 15)
         right_layout.setSpacing(8)
 
-        # 1. Operation Mode
+        # 1. Operation Mode (Default: Mode 2 Auto Clipboard)
         mode_box = QHBoxLayout()
         lbl_mode = QLabel("Mode:")
         self.combo_mode = QComboBox()
         self.combo_mode.setFocusPolicy(Qt.NoFocus)
         self.combo_mode.addItem("Mode 1: Manual (Click / Push)", "manual")
         self.combo_mode.addItem("Mode 2: Auto Clipboard (Direct)", "auto_clipboard")
+        self.combo_mode.setCurrentIndex(1)
         self.combo_mode.setToolTip(
             "[Mode 1]: Read on click or selection push.\n"
-            "[Mode 2]: Automatically read newly copied English text."
+            "[Mode 2]: Automatically read newly copied English text or IPA."
         )
         self.combo_mode.currentIndexChanged.connect(self.on_mode_changed)
         mode_box.addWidget(lbl_mode)
@@ -626,7 +654,7 @@ class CyberTtsPlayer(QWidget):
         font_size_box.addWidget(lbl_font_size)
         font_size_box.addWidget(self.spin_font_size, 1)
 
-        # 8. Adjustable Window Transparency (0% Light Mode -> 1%~95% Dark Glass Mode)
+        # 8. Adjustable Window Transparency (Default: 30% Dark Glass Mode)
         opacity_box = QHBoxLayout()
         opacity_box.setSpacing(8)
         lbl_opacity = QLabel("Transp.:")
@@ -637,11 +665,11 @@ class CyberTtsPlayer(QWidget):
         self.slider_opacity = QSlider(Qt.Horizontal)
         self.slider_opacity.setFocusPolicy(Qt.NoFocus)
         self.slider_opacity.setRange(0, 95)
-        self.slider_opacity.setValue(0)
-        self.slider_opacity.setToolTip("Transparency: 0% (Opaque Light Mode)")
+        self.slider_opacity.setValue(30)
+        self.slider_opacity.setToolTip("Transparency: 30% Dark Glass")
         self.slider_opacity.valueChanged.connect(self.on_transparency_changed)
 
-        self.lbl_opacity_val = QLabel("0%")
+        self.lbl_opacity_val = QLabel("30%")
         self.lbl_opacity_val.setObjectName("lblHighlightStats")
         self.lbl_opacity_val.setFixedWidth(36)
         self.lbl_opacity_val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -701,6 +729,36 @@ class CyberTtsPlayer(QWidget):
         root_layout.addWidget(self.container)
 
     # ---------------------------------------------------------------------
+    # Phonetic Reading Mode Toggle
+    # ---------------------------------------------------------------------
+    def on_phonetic_mode_toggled(self, checked: bool):
+        if checked:
+            self.btn_phonetic_mode.setText("🔊 IPA: ON")
+            self.btn_phonetic_mode.setToolTip(
+                "Phonetic Reading Mode: ON\n"
+                "Auto-converts dictionary IPA (e.g. [ˈhaʊdʒə ˈfiːləˌbaʊt]) into native Kokoro phonemes"
+            )
+            self.text_edit.setPlaceholderText(
+                "Phonetic Mode ON — Paste IPA phonemes directly...\n"
+                "• Auto-converts dictionary IPA ([ˈhaʊdʒə ˈfiːləˌbaʊt]), slashes (/.../), and W:/M: speakers\n"
+                "• Automatically shifts syllable stress markers to vowels and maps diphthongs"
+            )
+        else:
+            self.btn_phonetic_mode.setText("IPA: OFF")
+            self.btn_phonetic_mode.setToolTip(
+                "Phonetic Reading Mode: OFF (Normal English Text)\n"
+                "Click to switch to IPA Phoneme Mode (auto-converts dictionary IPA to Kokoro phonemes)"
+            )
+            self.text_edit.setPlaceholderText(
+                "Paste English dialogue, annotated study guides, or trap tables here...\n"
+                "• Supports W:/M: dual voices, **stress**, (silent), [phonetic], ‿ linking, and / pauses\n"
+                "• Double-click any sentence to loop it; select any phrase + Alt+P to drill-read"
+            )
+
+        self.on_text_changed()
+        self.save_user_preferences()
+
+    # ---------------------------------------------------------------------
     # Adjustable Transparency & Light/Dark Glass Theme Handlers
     # ---------------------------------------------------------------------
     def on_transparency_changed(self, value: int):
@@ -747,9 +805,43 @@ class CyberTtsPlayer(QWidget):
     # ---------------------------------------------------------------------
     # Learning Material Ingestion, 2-Column Drill Cards & Sentence Loop Helpers
     # ---------------------------------------------------------------------
+    def set_plain_editor_text(self, text: str):
+        self.text_edit.blockSignals(True)
+        self.text_edit.is_rich_annotated = False
+        self.text_edit._raw_annotated_text = ""
+        self.text_edit.setPlainText(text)
+        self.text_edit.blockSignals(False)
+        self.on_text_changed()
+
     def ingest_learning_text(
         self, raw_payload, auto_play=False, target_loops=None, progressive=False
     ):
+        if self.is_phonetic_mode():
+            if isinstance(raw_payload, dict):
+                raw_str = raw_payload.get("dialogue") or raw_payload.get("text") or ""
+            else:
+                raw_str = str(raw_payload or "")
+            lines = [ln.strip() for ln in raw_str.splitlines() if ln.strip()]
+            display_text = "\n".join(lines)
+
+            if self.chk_split.isChecked() and display_text:
+                expanded_lines = []
+                for line in display_text.splitlines():
+                    sents = split_into_sentences(line)
+                    expanded_lines.extend(sents if sents else [line])
+                display_text = "\n\n".join(expanded_lines)
+
+            self.clear_sentence_loop()
+            self.clear_active_highlight()
+            self.populate_drill_cards([])
+
+            if display_text:
+                self.set_plain_editor_text(display_text)
+
+            if auto_play and display_text:
+                self.play_audio(target_loops=target_loops, progressive=progressive)
+            return
+
         parsed = parse_learning_material(raw_payload)
         display_text = parsed["display_text"]
         drills = parsed["drills"]
@@ -810,7 +902,8 @@ class CyberTtsPlayer(QWidget):
         self.left_splitter.setSizes([int(total_h * 0.62), int(total_h * 0.38)])
 
     def play_drill_phrase(self, phrase: str):
-        clean_p = clean_annotated_for_tts(phrase)
+        phonetic_mode = self.is_phonetic_mode()
+        clean_p = clean_annotated_for_tts(phrase, phonetic_mode=phonetic_mode)
         if not clean_p:
             return
         if self.is_playing:
@@ -818,7 +911,13 @@ class CyberTtsPlayer(QWidget):
 
         voice_key = self.combo_voice.currentText().split(" ")[0]
         device = self.combo_device.currentData() or "cpu"
-        self.drill_thread.play_phrase(clean_p, voice=voice_key, speed=0.85, device=device)
+        self.drill_thread.play_phrase(
+            clean_p,
+            voice=voice_key,
+            speed=0.85,
+            device=device,
+            phonetic_mode=phonetic_mode,
+        )
 
     def on_drill_audio_ready(self, drill_audio):
         if drill_audio is not None and len(drill_audio) > 0:
@@ -830,7 +929,6 @@ class CyberTtsPlayer(QWidget):
         self.clear_sentence_loop()
         self.clear_active_highlight()
         self.populate_drill_cards([])
-        self.text_edit.clear_source_cache()
         self.text_edit.clear()
         self.current_audio = None
         self.timeline = []
@@ -1021,6 +1119,13 @@ class CyberTtsPlayer(QWidget):
             self.toggle_window_visibility()
 
     def cleanup_resources(self):
+        self._apply_resize_cursor(None)
+        app_inst = QApplication.instance()
+        if app_inst is not None:
+            try:
+                app_inst.removeEventFilter(self)
+            except Exception:
+                pass
         self.save_user_preferences()
         self.stop_all(reset_progress=True)
         if hasattr(self, "http_thread") and self.http_thread:
@@ -1073,44 +1178,90 @@ class CyberTtsPlayer(QWidget):
         self.save_user_preferences()
 
     # ---------------------------------------------------------------------
-    # Frameless Window Drag, Edge Resize & Keyboard Shortcuts
+    # Frameless Window Drag, 4-Corner & Edge Resize & Keyboard Shortcuts
     # ---------------------------------------------------------------------
     def get_edge_direction(self, pos):
         r = self.rect()
-        left = pos.x() <= EDGE_MARGIN
-        right = pos.x() >= r.width() - EDGE_MARGIN
-        top = pos.y() <= EDGE_MARGIN
-        bottom = pos.y() >= r.height() - EDGE_MARGIN
+        w, h = r.width(), r.height()
+        x, y = pos.x(), pos.y()
 
-        if left and top:
+        if x < 0 or x > w or y < 0 or y > h:
+            return None
+
+        # Generous 4-corner hit zones (top-left, top-right, bottom-left, bottom-right)
+        in_corner_left = x <= CORNER_MARGIN
+        in_corner_right = x >= w - CORNER_MARGIN
+        in_corner_top = y <= CORNER_MARGIN
+        in_corner_bottom = y >= h - CORNER_MARGIN
+
+        if in_corner_left and in_corner_top:
             return "top-left"
-        if right and top:
+        if in_corner_right and in_corner_top:
             return "top-right"
-        if left and bottom:
+        if in_corner_left and in_corner_bottom:
             return "bottom-left"
-        if right and bottom:
+        if in_corner_right and in_corner_bottom:
             return "bottom-right"
-        if left:
+
+        # Straight edges
+        if x <= EDGE_MARGIN:
             return "left"
-        if right:
+        if x >= w - EDGE_MARGIN:
             return "right"
-        if top:
+        if y <= EDGE_MARGIN:
             return "top"
-        if bottom:
+        if y >= h - EDGE_MARGIN:
             return "bottom"
         return None
 
-    def update_cursor_shape(self, edge):
+    def _apply_resize_cursor(self, edge):
         if edge in ("top-left", "bottom-right"):
-            self.setCursor(Qt.SizeFDiagCursor)
+            target = Qt.SizeFDiagCursor
         elif edge in ("top-right", "bottom-left"):
-            self.setCursor(Qt.SizeBDiagCursor)
+            target = Qt.SizeBDiagCursor
         elif edge in ("left", "right"):
-            self.setCursor(Qt.SizeHorCursor)
+            target = Qt.SizeHorCursor
         elif edge in ("top", "bottom"):
-            self.setCursor(Qt.SizeVerCursor)
+            target = Qt.SizeVerCursor
         else:
-            self.setCursor(Qt.ArrowCursor)
+            target = None
+
+        if target != self._override_cursor_shape:
+            if self._override_cursor_shape is not None:
+                QApplication.restoreOverrideCursor()
+            if target is not None:
+                QApplication.setOverrideCursor(target)
+            self._override_cursor_shape = target
+
+    def _apply_geometry_resize(self, global_pos):
+        delta = global_pos - self.drag_start_pos
+        geo = QRect(self.drag_start_geo)
+        min_w = self.minimumWidth()
+        min_h = self.minimumHeight()
+
+        if "right" in self.drag_edge:
+            geo.setWidth(max(min_w, self.drag_start_geo.width() + delta.x()))
+        elif "left" in self.drag_edge:
+            new_w = max(min_w, self.drag_start_geo.width() - delta.x())
+            geo.setLeft(self.drag_start_geo.right() - new_w)
+
+        if "bottom" in self.drag_edge:
+            geo.setHeight(max(min_h, self.drag_start_geo.height() + delta.y()))
+        elif "top" in self.drag_edge:
+            new_h = max(min_h, self.drag_start_geo.height() - delta.y())
+            geo.setTop(self.drag_start_geo.bottom() - new_h)
+
+        self.setGeometry(geo)
+
+    def leaveEvent(self, event):
+        if not self.drag_edge:
+            self._apply_resize_cursor(None)
+        super().leaveEvent(event)
+
+    def hideEvent(self, event):
+        self.drag_edge = None
+        self._apply_resize_cursor(None)
+        super().hideEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -1132,6 +1283,7 @@ class CyberTtsPlayer(QWidget):
                 self.drag_edge = edge
                 self.drag_start_geo = self.geometry()
                 self.drag_start_pos = event.globalPos()
+                self._apply_resize_cursor(edge)
                 event.accept()
                 return
 
@@ -1140,24 +1292,7 @@ class CyberTtsPlayer(QWidget):
 
     def mouseMoveEvent(self, event):
         if self.drag_edge and (event.buttons() & Qt.LeftButton):
-            delta = event.globalPos() - self.drag_start_pos
-            geo = QRect(self.drag_start_geo)
-            min_w = self.minimumWidth()
-            min_h = self.minimumHeight()
-
-            if "right" in self.drag_edge:
-                geo.setWidth(max(min_w, self.drag_start_geo.width() + delta.x()))
-            elif "left" in self.drag_edge:
-                new_w = max(min_w, self.drag_start_geo.width() - delta.x())
-                geo.setLeft(self.drag_start_geo.right() - new_w)
-
-            if "bottom" in self.drag_edge:
-                geo.setHeight(max(min_h, self.drag_start_geo.height() + delta.y()))
-            elif "top" in self.drag_edge:
-                new_h = max(min_h, self.drag_start_geo.height() - delta.y())
-                geo.setTop(self.drag_start_geo.bottom() - new_h)
-
-            self.setGeometry(geo)
+            self._apply_geometry_resize(event.globalPos())
             event.accept()
             return
 
@@ -1167,12 +1302,12 @@ class CyberTtsPlayer(QWidget):
             return
 
         edge = self.get_edge_direction(event.pos())
-        self.update_cursor_shape(edge)
+        self._apply_resize_cursor(edge)
 
     def mouseReleaseEvent(self, event):
         self.drag_edge = None
         self.drag_pos = QPoint()
-        self.update_cursor_shape(None)
+        self._apply_resize_cursor(self.get_edge_direction(event.pos()))
         self.save_user_preferences()
 
     def closeEvent(self, event):
@@ -1192,7 +1327,36 @@ class CyberTtsPlayer(QWidget):
         bring_window_to_foreground(int(self.winId()))
 
     def eventFilter(self, obj, event):
-        if obj == self.text_edit and event.type() == QEvent.KeyPress:
+        etype = event.type()
+
+        # Intercept 4-corner & edge resize events across all child widgets inside this window
+        if self.isVisible() and isinstance(obj, QWidget) and (obj is self or self.isAncestorOf(obj)):
+            if etype == QEvent.MouseMove:
+                if self.drag_edge and (event.buttons() & Qt.LeftButton):
+                    self._apply_geometry_resize(event.globalPos())
+                    return True
+                if event.buttons() == Qt.NoButton:
+                    local_pos = self.mapFromGlobal(event.globalPos())
+                    self._apply_resize_cursor(self.get_edge_direction(local_pos))
+            elif etype == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+                local_pos = self.mapFromGlobal(event.globalPos())
+                edge = self.get_edge_direction(local_pos)
+                if edge:
+                    self.drag_edge = edge
+                    self.drag_start_geo = self.geometry()
+                    self.drag_start_pos = event.globalPos()
+                    self._apply_resize_cursor(edge)
+                    return True
+            elif etype == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+                if self.drag_edge:
+                    self.drag_edge = None
+                    self.drag_pos = QPoint()
+                    local_pos = self.mapFromGlobal(event.globalPos())
+                    self._apply_resize_cursor(self.get_edge_direction(local_pos))
+                    self.save_user_preferences()
+                    return True
+
+        if obj == self.text_edit and etype == QEvent.KeyPress:
             if event.key() == Qt.Key_Escape:
                 if self.loop_segment is not None:
                     self.clear_sentence_loop()
@@ -1242,7 +1406,7 @@ class CyberTtsPlayer(QWidget):
             super().keyPressEvent(event)
 
     def show_help_dialog(self):
-        dialog = CyberHelpDialog(self, is_dark=(self.transparency > 0))
+        dialog = CyberHelpDialog(self)
         geo = self.geometry()
         dialog.move(geo.center() - dialog.rect().center())
         dialog.exec_()
@@ -1253,8 +1417,9 @@ class CyberTtsPlayer(QWidget):
     def on_text_changed(self):
         visible_text = self.text_edit.toPlainText().strip()
         if not visible_text:
-            self.text_edit.clear_source_cache()
-        clean_tts = sanitize_text(visible_text)
+            self.text_edit.is_rich_annotated = False
+            self.text_edit._raw_annotated_text = ""
+        clean_tts = sanitize_text(visible_text, phonetic_mode=self.is_phonetic_mode())
         words = len(clean_tts.split()) if clean_tts else 0
         chars = len(clean_tts)
         self.lbl_stats.setText(f"Words: {words} | Chars: {chars}")
@@ -1270,15 +1435,15 @@ class CyberTtsPlayer(QWidget):
             for line in visible_text.splitlines():
                 sents = split_into_sentences(line)
                 expanded.extend(sents if sents else [line])
-            self.text_edit.set_annotated_content(
-                "\n\n".join(expanded),
-                font_size=self.spin_font_size.value(),
-                is_dark=(self.transparency > 0),
-            )
+            updated_text = "\n\n".join(expanded)
         else:
-            compact = re.sub(r"\s*\n+\s*", " ", visible_text).strip()
+            updated_text = re.sub(r"\s*\n+\s*", " ", visible_text).strip()
+
+        if self.is_phonetic_mode():
+            self.set_plain_editor_text(updated_text)
+        else:
             self.text_edit.set_annotated_content(
-                compact,
+                updated_text,
                 font_size=self.spin_font_size.value(),
                 is_dark=(self.transparency > 0),
             )
@@ -1307,6 +1472,8 @@ class CyberTtsPlayer(QWidget):
         if not visible_text:
             return
 
+        phonetic_mode = self.is_phonetic_mode()
+
         if self.chk_split.isChecked():
             expanded = []
             for line in visible_text.splitlines():
@@ -1314,14 +1481,17 @@ class CyberTtsPlayer(QWidget):
                 expanded.extend(sents if sents else [line])
             split_joined = "\n\n".join(expanded)
             if split_joined != visible_text:
-                self.text_edit.set_annotated_content(
-                    split_joined,
-                    font_size=self.spin_font_size.value(),
-                    is_dark=(self.transparency > 0),
-                )
+                if phonetic_mode:
+                    self.set_plain_editor_text(split_joined)
+                else:
+                    self.text_edit.set_annotated_content(
+                        split_joined,
+                        font_size=self.spin_font_size.value(),
+                        is_dark=(self.transparency > 0),
+                    )
                 visible_text = self.text_edit.toPlainText().strip()
 
-        segments = build_timeline_segments(visible_text)
+        segments = build_timeline_segments(visible_text, phonetic_mode=phonetic_mode)
         if not segments:
             return
 
@@ -1365,6 +1535,7 @@ class CyberTtsPlayer(QWidget):
             pause_sec=pause_sec,
             device=selected_device,
             progressive=progressive,
+            phonetic_mode=phonetic_mode,
         )
 
     def on_synth_finished(self, result_dict: dict):
@@ -1555,6 +1726,13 @@ class CyberTtsPlayer(QWidget):
     # User Preferences Persistence
     # ---------------------------------------------------------------------
     def load_user_preferences(self):
+        # One-time migration to apply new defaults (30% transparency & Auto Clipboard mode)
+        if not self.settings.value("v3_2_defaults_migrated", False, type=bool):
+            self.settings.setValue("win_transparency", 30)
+            self.settings.setValue("work_mode", "auto_clipboard")
+            self.settings.setValue("v3_2_defaults_migrated", True)
+            self.settings.sync()
+
         saved_width = self.settings.value("win_width", 940, type=int)
         saved_height = self.settings.value("win_height", 650, type=int)
         self.resize(max(720, saved_width), max(520, saved_height))
@@ -1570,16 +1748,25 @@ class CyberTtsPlayer(QWidget):
         else:
             self.splitter.setSizes([665, 275])
 
+        is_phonetic = self.settings.value("phonetic_mode", False, type=bool)
+        self.btn_phonetic_mode.setChecked(is_phonetic)
+        self.on_phonetic_mode_toggled(is_phonetic)
+
         self.chk_split.setChecked(
             self.settings.value("sentence_split", False, type=bool)
         )
 
-        saved_mode = self.settings.value("work_mode", "manual", type=str)
+        saved_mode = self.settings.value("work_mode", "auto_clipboard", type=str)
         mode_idx = self.combo_mode.findData(saved_mode)
         if mode_idx >= 0:
             self.combo_mode.setCurrentIndex(mode_idx)
         else:
-            self.combo_mode.setCurrentIndex(0)
+            self.combo_mode.setCurrentIndex(1)
+
+        if hasattr(self, "act_mode1") and hasattr(self, "act_mode2"):
+            cur_mode = self.combo_mode.currentData()
+            self.act_mode1.setChecked(cur_mode == "manual")
+            self.act_mode2.setChecked(cur_mode == "auto_clipboard")
 
         auto_limit = self.settings.value("auto_max_chars", 1000, type=int)
         self.spin_auto_limit.setValue(auto_limit)
@@ -1627,7 +1814,7 @@ class CyberTtsPlayer(QWidget):
         font_size = self.settings.value("font_size", 18, type=int)
         self.spin_font_size.setValue(font_size)
 
-        saved_transp = self.settings.value("win_transparency", 0, type=int)
+        saved_transp = self.settings.value("win_transparency", 30, type=int)
         clamped_t = clamp_transparency(saved_transp)
         self.slider_opacity.setValue(clamped_t)
         self.on_transparency_changed(clamped_t)
@@ -1638,6 +1825,8 @@ class CyberTtsPlayer(QWidget):
             self.settings.setValue("win_height", self.height())
         if hasattr(self, "splitter"):
             self.settings.setValue("splitter_sizes", self.splitter.sizes())
+        if hasattr(self, "btn_phonetic_mode"):
+            self.settings.setValue("phonetic_mode", self.btn_phonetic_mode.isChecked())
         self.settings.setValue("sentence_split", self.chk_split.isChecked())
         if hasattr(self, "combo_mode"):
             self.settings.setValue("work_mode", self.combo_mode.currentData())

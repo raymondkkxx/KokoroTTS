@@ -8,7 +8,8 @@ TRAY_ICON_PATH = os.path.join(APP_ROOT_DIR, "tts.png")
 
 # Audio & Window Constants
 SAMPLE_RATE = 24000
-EDGE_MARGIN = 8
+EDGE_MARGIN = 12
+CORNER_MARGIN = 22
 HTTP_HOST = "127.0.0.1"
 HTTP_PORT = 54322
 
@@ -70,7 +71,7 @@ def get_available_voices() -> list:
     return voices
 
 
-def build_text_edit_stylesheet(font_size: int, transparency: int = 0) -> str:
+def build_text_edit_stylesheet(font_size: int, transparency: int = 30) -> str:
     t = clamp_transparency(transparency)
     opacity_pct = 100 - t
     is_dark = t > 0
@@ -101,17 +102,19 @@ def build_text_edit_stylesheet(font_size: int, transparency: int = 0) -> str:
             border: 1.5px solid {PALETTE_ROSE};
         }}
     """
+
+
 def clamp_transparency(val: int) -> int:
     try:
         v = int(val)
     except Exception:
-        v = 0
+        v = 30
     return max(0, min(95, v))
 
 
-def build_main_stylesheet(transparency: int = 0, is_setting_open: bool = False) -> str:
+def build_main_stylesheet(transparency: int = 30, is_setting_open: bool = False) -> str:
     """
-    Generate adaptive stylesheet aligned with window_list_server.py:
+    Generate adaptive stylesheet:
       - 0% transparency: Crisp White & Zinc Light Mode (#FFFFFF / #F4F4F5)
       - 1%~95% transparency: Crystal-Clear Dark Black-Gray Glass Mode (rgba(18, 20, 24, alpha))
     """
@@ -423,6 +426,28 @@ QPushButton#btnTopAction {{
 QPushButton#btnTopAction:hover {{
     background-color: {ctrl_hover};
     color: {text_main};
+}}
+QPushButton#btnPhoneticMode {{
+    background-color: {ctrl_bg};
+    color: {text_sub};
+    font-size: 12px;
+    font-weight: bold;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 3px 10px;
+    font-family: {FONT_STACK};
+}}
+QPushButton#btnPhoneticMode:hover {{
+    background-color: {ctrl_hover};
+    color: {text_main};
+}}
+QPushButton#btnPhoneticMode:checked {{
+    background-color: {PALETTE_ROSE};
+    color: #FFFFFF;
+    border: 1px solid {PALETTE_ROSE};
+}}
+QPushButton#btnPhoneticMode:checked:hover {{
+    background-color: {PALETTE_ROSE_DEEP};
 }}
 QPushButton#btnSettingToggle {{
     background-color: {setting_btn_bg};

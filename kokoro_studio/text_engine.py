@@ -43,6 +43,10 @@ ABBREVIATIONS = [
     r"vol\.",
 ]
 
+# Kokoro / Misaki vowel inventory (including single-letter diphthong codes A, I, O, Q, W, Y, U)
+KOKORO_VOWELS = "aeiouæɑɒɔəɚɛɜɪʊʌɐAIOWYUQ"
+KOKORO_CONSONANT_RE = r"[^\s\.,!?;:\-\(\)\[\]/ˈˌaeiouæɑɒɔəɚɛɜɪʊʌɐAIOWYUQ0-9]"
+
 
 def detect_speaker(line: str):
     """Return ('F'|'M'|'DEFAULT', line_without_speaker_prefix)."""
@@ -54,20 +58,80 @@ def detect_speaker(line: str):
     return speaker, line[m.end() :].strip()
 
 
-def clean_annotated_for_tts(text: str) -> str:
+def clean_phonetic_for_tts(text: str) -> str:
     """
-    Convert annotated learning text into pure, natural English for Kokoro TTS:
-    - Strip speaker tags (W:, M:)
-    - Remove bracketed phonetics / citations: [ði], [mə-ˈtɪ-kjə-ləs]
-    - Restore weak glide syllables: *(to de)* -> to de
-    - Restore silent letters: nee(d) -> need
-    - Remove stress markers: de**cide** -> decide
-    - Convert linking tie '‿' into natural word space
-    - Convert sense-group slash '/' into a soft comma pause
-    - Strip CJK characters and non-vocal symbols
+    Convert standard dictionary IPA (e.g. [ˈhaʊdʒə ˈfiːləˌbaʊt]) into native
+    Kokoro / Misaki phoneme tokens (e.g. hˈWʤə fˈiləbˌWt):
+    - Strip speaker tags (W:, M:) and /.../ or [...] wrappers
+    - Merge dictionary diphthongs into Misaki single-letter symbols (aʊ->W, aɪ->I, eɪ->A, ɔɪ->Y, oʊ->O, əʊ->Q)
+    - Normalize affricates/consonants (tʃ->ʧ, dʒ->ʤ, g->ɡ, ər->ɚ, r->ɹ) and strip length marks (ː)
+    - Shift syllable-initial stress markers (ˈ, ˌ) past onset consonants so they sit directly before the vowel
     """
     if not text:
         return ""
+
+    _, t = detect_speaker(text)
+
+    # Convert [word](/phonemes/) inline syntax into pure phonemes
+    t = re.sub(r"\[[^\]]*\]\(/([^/]+)/\)", r" \1 ", t)
+
+    # Unwrap /phonemes/ and [phonemes] brackets without deleting inner IPA symbols
+    t = t.replace("/", " ").replace("[", " ").replace("]", " ")
+
+    # Normalize tie bars and affricates
+    t = t.replace("\u0361", "").replace("\u035c", "")
+    t = t.replace("tʃ", "ʧ").replace("dʒ", "ʤ")
+
+    # Map standard dictionary diphthongs to Kokoro/Misaki single-character phoneme tokens
+    t = t.replace("aʊ", "W").replace("ɑʊ", "W")
+    t = t.replace("aɪ", "I").replace("ɑɪ", "I")
+    t = t.replace("eɪ", "A")
+    t = t.replace("ɔɪ", "Y")
+    t = t.replace("oʊ", "O")
+    t = t.replace("əʊ", "Q")
+
+    # Normalize rhotic schwa & consonants to Kokoro IPA symbols
+    t = t.replace("ər", "ɚ").replace("ɜr", "ɚ").replace("ɜːr", "ɚ")
+    t = t.replace("g", "ɡ").replace("r", "ɹ")
+
+    # Strip dictionary length markers (ː or colon after vowel) and mid-word syllable dots
+    t = t.replace("ː", "")
+    t = re.sub(r"(?<=[a-zæɑɒɔəɚɛɜɪʊʌɐAIOWYUQ]):", "", t)
+    t = re.sub(r"(?<=\S)\.(?=\S)", "", t)
+
+    # Filter CJK characters and CJK punctuation
+    t = re.sub(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]", " ", t)
+    t = re.sub(
+        r"[\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]",
+        " ",
+        t,
+    )
+
+    # Strip non-phoneme ASCII symbols while keeping IPA letters, stress (ˈˌ), and punctuation
+    t = re.sub(r"[`~@#$%^&*()_+=\|\\<>{}\t]+", " ", t)
+    t = re.sub(r"\s+([,.!?;:])", r"\1", t)
+    t = re.sub(r"[ ]{2,}", " ", t).strip()
+
+    # Move syllable-initial stress markers (ˈ, ˌ) past onset consonants to right before the vowel
+    # e.g. ˈhWʤə -> hˈWʤə, ˈfiləˌbWt -> fˈiləbˌWt
+    t = re.sub(
+        r"([ˈˌ])(" + KOKORO_CONSONANT_RE + r"+)(?=[" + KOKORO_VOWELS + r"])",
+        r"\2\1",
+        t,
+    )
+    return t
+
+
+def clean_annotated_for_tts(text: str, phonetic_mode: bool = False) -> str:
+    """
+    Convert annotated learning text into pure, natural English for Kokoro TTS,
+    or convert & normalize IPA phonemes when phonetic_mode=True.
+    """
+    if not text:
+        return ""
+
+    if phonetic_mode:
+        return clean_phonetic_for_tts(text)
 
     _, t = detect_speaker(text)
 
@@ -105,13 +169,13 @@ def clean_annotated_for_tts(text: str) -> str:
     return t
 
 
-def sanitize_text(text: str) -> str:
+def sanitize_text(text: str, phonetic_mode: bool = False) -> str:
     """Sanitize plain text lines while preserving line breaks."""
     if not text:
         return ""
     lines = []
     for line in text.splitlines():
-        cleaned = clean_annotated_for_tts(line)
+        cleaned = clean_annotated_for_tts(line, phonetic_mode=phonetic_mode)
         if cleaned:
             lines.append(cleaned)
     return "\n".join(lines).strip()
@@ -351,7 +415,7 @@ def split_into_sentences(text: str) -> list:
     return sentences
 
 
-def build_timeline_segments(visible_text: str) -> list:
+def build_timeline_segments(visible_text: str, phonetic_mode: bool = False) -> list:
     """
     Map visible text in QTextEdit into aligned sentence segments:
     Returns list of dicts:
@@ -376,8 +440,8 @@ def build_timeline_segments(visible_text: str) -> list:
                 end_pos = pos + len(sent)
                 search_cursor = end_pos
 
-                tts_clean = clean_annotated_for_tts(sent)
-                if tts_clean and re.search(r"[a-zA-Z0-9]", tts_clean):
+                tts_clean = clean_annotated_for_tts(sent, phonetic_mode=phonetic_mode)
+                if tts_clean and re.search(r"[^\W\d_]|[0-9]", tts_clean):
                     segments.append(
                         {
                             "start_char": offset + pos,
