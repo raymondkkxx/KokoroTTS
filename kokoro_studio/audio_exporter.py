@@ -9,7 +9,28 @@ import wave
 import numpy as np
 
 from kokoro_studio.config import APP_ROOT_DIR, DEFAULT_EXPORT_ARTIST, SAMPLE_RATE, TRAY_ICON_PATH
-from kokoro_studio.text_engine import sanitize_text
+from kokoro_studio.text_engine import sanitize_export_stem, sanitize_text
+
+
+def resolve_unique_mp3_path(directory: str, stem: str) -> str:
+    """
+    Build target MP3 path in `directory` from `stem`, appending (1), (2), ...
+    automatically when a file with the same name already exists.
+    """
+    target_dir = directory if directory else APP_ROOT_DIR
+    os.makedirs(target_dir, exist_ok=True)
+
+    safe_stem = sanitize_export_stem(stem, fallback="kokoro_speech")
+    candidate = os.path.join(target_dir, f"{safe_stem}.mp3")
+    if not os.path.exists(candidate):
+        return candidate
+
+    counter = 1
+    while True:
+        numbered = os.path.join(target_dir, f"{safe_stem} ({counter}).mp3")
+        if not os.path.exists(numbered):
+            return numbered
+        counter += 1
 
 
 def compute_export_loop_count(duration_sec: float) -> int:

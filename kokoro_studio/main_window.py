@@ -5,9 +5,7 @@ import re
 import subprocess
 import sys
 import time
-import wave
 
-import numpy as np
 from PyQt5.QtCore import (
     QEvent,
     QFileSystemWatcher,
@@ -18,7 +16,7 @@ from PyQt5.QtCore import (
     QTimer,
     pyqtSignal,
 )
-from PyQt5.QtGui import QColor, QIcon, QTextCharFormat, QTextCursor
+from PyQt5.QtGui import QColor, QFontMetrics, QIcon, QPixmap, QTextCharFormat, QTextCursor
 from PyQt5.QtNetwork import QLocalServer
 from PyQt5.QtWidgets import (
     QAction,
@@ -31,6 +29,7 @@ from PyQt5.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMenu,
     QMessageBox,
     QPushButton,
@@ -46,14 +45,13 @@ from PyQt5.QtWidgets import (
 import sounddevice as sd
 import torch
 
-from kokoro_studio.audio_exporter import export_netease_mp3_file
+from kokoro_studio.audio_exporter import export_netease_mp3_file, resolve_unique_mp3_path
 from kokoro_studio.config import (
     APP_ROOT_DIR,
     CORNER_MARGIN,
     DEFAULT_EXPORT_ARTIST,
     EDGE_MARGIN,
     PALETTE_BLACK,
-    PALETTE_ORANGE,
     SAMPLE_RATE,
     SINGLE_INSTANCE_KEY,
     TRAY_ICON_PATH,
@@ -68,6 +66,7 @@ from kokoro_studio.text_engine import (
     build_timeline_segments,
     detect_is_pure_phonetic_input,
     parse_learning_material,
+    sanitize_export_stem,
     sanitize_text,
     split_into_sentences,
 )
@@ -97,8 +96,8 @@ class CyberTtsPlayer(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(True)
 
-        self.setMinimumSize(720, 520)
-        self.resize(940, 650)
+        self.setMinimumSize(720, 560)
+        self.resize(940, 660)
 
         self.transparency = 30  # Default 30% Dark Glass Mode
         self.drag_pos = QPoint()
@@ -115,6 +114,10 @@ class CyberTtsPlayer(QWidget):
         self.timeline = []
         self.loop_segment = None
         self.active_highlight_range = None
+
+        self.export_cover_path = TRAY_ICON_PATH
+        self.export_dir = APP_ROOT_DIR
+        self._custom_filename_edited = False
 
         self.play_start_time = 0.0
         self.play_offset_sec = 0.0
@@ -515,10 +518,10 @@ class CyberTtsPlayer(QWidget):
         # Right Control Panel
         right_panel = QFrame()
         right_panel.setObjectName("rightPanel")
-        right_panel.setMinimumWidth(275)
+        right_panel.setMinimumWidth(280)
         right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(15, 15, 15, 15)
-        right_layout.setSpacing(8)
+        right_layout.setContentsMargins(14, 11, 14, 11)
+        right_layout.setSpacing(5)
 
         # 1. Operation Mode (Default: Mode 2 Auto Clipboard)
         mode_box = QHBoxLayout()
@@ -703,6 +706,84 @@ class CyberTtsPlayer(QWidget):
         opacity_box.addWidget(self.slider_opacity, 1)
         opacity_box.addWidget(self.lbl_opacity_val)
 
+        # 9. MP3 Export Cover Selector (Thumbnail + Filename + Choose + Reset)
+        cover_box = QHBoxLayout()
+        cover_box.setSpacing(5)
+        lbl_cover = QLabel("Cover:")
+        lbl_cover.setFixedWidth(48)
+
+        self.lbl_cover_thumb = QLabel()
+        self.lbl_cover_thumb.setObjectName("lblCoverThumb")
+        self.lbl_cover_thumb.setFixedSize(24, 24)
+        self.lbl_cover_thumb.setAlignment(Qt.AlignCenter)
+
+        self.lbl_cover_name = QLabel("tts.png")
+        self.lbl_cover_name.setObjectName("lblExportInfo")
+        self.lbl_cover_name.setMinimumWidth(60)
+
+        self.btn_choose_cover = QPushButton("📂")
+        self.btn_choose_cover.setObjectName("btnMiniTool")
+        self.btn_choose_cover.setFixedSize(28, 24)
+        self.btn_choose_cover.setFocusPolicy(Qt.NoFocus)
+        self.btn_choose_cover.setToolTip("Select default MP3 cover image")
+        self.btn_choose_cover.clicked.connect(self.choose_export_cover)
+
+        self.btn_reset_cover = QPushButton("↺")
+        self.btn_reset_cover.setObjectName("btnMiniTool")
+        self.btn_reset_cover.setFixedSize(26, 24)
+        self.btn_reset_cover.setFocusPolicy(Qt.NoFocus)
+        self.btn_reset_cover.setToolTip("Reset cover to default tts.png")
+        self.btn_reset_cover.clicked.connect(self.reset_export_cover)
+
+        cover_box.addWidget(lbl_cover)
+        cover_box.addWidget(self.lbl_cover_thumb)
+        cover_box.addWidget(self.lbl_cover_name, 1)
+        cover_box.addWidget(self.btn_choose_cover)
+        cover_box.addWidget(self.btn_reset_cover)
+
+        # 10. MP3 Default Save Folder Selector
+        folder_box = QHBoxLayout()
+        folder_box.setSpacing(5)
+        lbl_folder = QLabel("Folder:")
+        lbl_folder.setFixedWidth(48)
+
+        self.lbl_export_dir = QLabel(APP_ROOT_DIR)
+        self.lbl_export_dir.setObjectName("lblExportInfo")
+        self.lbl_export_dir.setMinimumWidth(80)
+
+        self.btn_choose_dir = QPushButton("📂")
+        self.btn_choose_dir.setObjectName("btnMiniTool")
+        self.btn_choose_dir.setFixedSize(28, 24)
+        self.btn_choose_dir.setFocusPolicy(Qt.NoFocus)
+        self.btn_choose_dir.setToolTip("Choose default MP3 export folder")
+        self.btn_choose_dir.clicked.connect(self.choose_export_directory)
+
+        folder_box.addWidget(lbl_folder)
+        folder_box.addWidget(self.lbl_export_dir, 1)
+        folder_box.addWidget(self.btn_choose_dir)
+
+        # 11. MP3 Initial Filename Input (Editable, auto-populated from text)
+        name_box = QHBoxLayout()
+        name_box.setSpacing(5)
+        lbl_name = QLabel("Name:")
+        lbl_name.setFixedWidth(48)
+
+        self.edit_export_name = QLineEdit()
+        self.edit_export_name.setObjectName("editExportName")
+        self.edit_export_name.setPlaceholderText("kokoro_speech")
+        self.edit_export_name.setToolTip(
+            "Initial MP3 filename (auto-generated from text; click to customize).\n"
+            "Duplicate filenames are numbered automatically."
+        )
+        self.edit_export_name.textEdited.connect(self.on_export_name_edited)
+
+        lbl_ext = QLabel(".mp3")
+        lbl_ext.setObjectName("lblExportExt")
+
+        name_box.addWidget(lbl_name)
+        name_box.addWidget(self.edit_export_name, 1)
+        name_box.addWidget(lbl_ext)
+
         # Action Buttons
         self.btn_play = QPushButton("▶ Read Text")
         self.btn_play.setObjectName("btnPlay")
@@ -724,27 +805,15 @@ class CyberTtsPlayer(QWidget):
         self.btn_stop.clicked.connect(self.toggle_stop_or_resume)
         self.btn_stop.setEnabled(False)
 
-        save_row = QHBoxLayout()
-        save_row.setSpacing(6)
-
-        self.btn_save_wav = QPushButton("⭳ Save WAV")
-        self.btn_save_wav.setObjectName("btnSave")
-        self.btn_save_wav.setFocusPolicy(Qt.NoFocus)
-        self.btn_save_wav.setToolTip("Export as a local WAV audio file (Ctrl+S).")
-        self.btn_save_wav.clicked.connect(self.save_audio_file)
-
         self.btn_export_netease = QPushButton("🎵 Export MP3")
         self.btn_export_netease.setObjectName("btnNetease")
         self.btn_export_netease.setFocusPolicy(Qt.NoFocus)
         self.btn_export_netease.setToolTip(
-            "Export MP3 with embedded LRC lyrics for NetEase Cloud Music (Ctrl+Shift+S)\n"
+            "Export MP3 directly to the configured folder with embedded LRC lyrics & cover (Ctrl+S)\n"
             "• <5s: 3x loop | <20s: 2x loop | >=20s: 1x loop\n"
-            "• Artist: Raymondkkxx | Cover: tts.png"
+            "• Auto-numbers duplicate filenames"
         )
         self.btn_export_netease.clicked.connect(self.export_netease_mp3)
-
-        save_row.addWidget(self.btn_save_wav, 1)
-        save_row.addWidget(self.btn_export_netease, 1)
 
         right_layout.addLayout(mode_box)
         right_layout.addLayout(auto_limit_box)
@@ -758,16 +827,134 @@ class CyberTtsPlayer(QWidget):
         right_layout.addLayout(clip_loop_box)
         right_layout.addLayout(font_size_box)
         right_layout.addLayout(opacity_box)
+        right_layout.addLayout(cover_box)
+        right_layout.addLayout(folder_box)
+        right_layout.addLayout(name_box)
         right_layout.addStretch()
         right_layout.addWidget(self.btn_play)
         right_layout.addWidget(self.btn_stop)
-        right_layout.addLayout(save_row)
+        right_layout.addWidget(self.btn_export_netease)
 
         self.splitter.addWidget(left_widget)
         self.splitter.addWidget(right_panel)
         container_layout.addWidget(self.splitter)
 
         root_layout.addWidget(self.container)
+
+    # ---------------------------------------------------------------------
+    # MP3 Export Cover, Folder & Filename Helpers
+    # ---------------------------------------------------------------------
+    def _refresh_cover_ui(self):
+        cover_path = self.export_cover_path
+        if not cover_path or not os.path.isfile(cover_path):
+            cover_path = TRAY_ICON_PATH
+            self.export_cover_path = cover_path
+
+        fname = os.path.basename(cover_path) if cover_path else "tts.png"
+        fm = QFontMetrics(self.lbl_cover_name.font())
+        self.lbl_cover_name.setText(fm.elidedText(fname, Qt.ElideMiddle, 115))
+
+        tooltip = f"Current Cover: {cover_path}"
+        if os.path.isfile(cover_path):
+            pix = QPixmap(cover_path)
+            if not pix.isNull():
+                tooltip += f"\nResolution: {pix.width()}×{pix.height()}"
+                scaled = pix.scaled(
+                    20, 20, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
+                self.lbl_cover_thumb.setPixmap(scaled)
+            else:
+                self.lbl_cover_thumb.clear()
+                self.lbl_cover_thumb.setText("🖼")
+        else:
+            self.lbl_cover_thumb.clear()
+            self.lbl_cover_thumb.setText("🖼")
+
+        self.lbl_cover_thumb.setToolTip(tooltip)
+        self.lbl_cover_name.setToolTip(tooltip)
+
+    def _refresh_export_dir_ui(self):
+        target_dir = self.export_dir
+        if not target_dir or not os.path.isdir(target_dir):
+            target_dir = APP_ROOT_DIR
+            self.export_dir = target_dir
+
+        fm = QFontMetrics(self.lbl_export_dir.font())
+        self.lbl_export_dir.setText(fm.elidedText(target_dir, Qt.ElideLeft, 155))
+        self.lbl_export_dir.setToolTip(f"Default Export Folder:\n{target_dir}")
+
+    def choose_export_cover(self):
+        start_dir = (
+            os.path.dirname(self.export_cover_path)
+            if self.export_cover_path and os.path.exists(os.path.dirname(self.export_cover_path))
+            else APP_ROOT_DIR
+        )
+        img_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Default MP3 Cover Image",
+            start_dir,
+            "Image Files (*.png *.jpg *.jpeg *.webp *.bmp)",
+        )
+        if not img_path:
+            return
+
+        self.export_cover_path = os.path.normpath(img_path)
+        self._refresh_cover_ui()
+        self.save_user_preferences()
+
+    def reset_export_cover(self):
+        self.export_cover_path = TRAY_ICON_PATH
+        self._refresh_cover_ui()
+        self.save_user_preferences()
+
+    def choose_export_directory(self):
+        start_dir = (
+            self.export_dir
+            if self.export_dir and os.path.isdir(self.export_dir)
+            else APP_ROOT_DIR
+        )
+        chosen_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Select Default MP3 Export Folder",
+            start_dir,
+        )
+        if not chosen_dir:
+            return
+
+        self.export_dir = os.path.normpath(chosen_dir)
+        self._refresh_export_dir_ui()
+        self.save_user_preferences()
+
+    def on_export_name_edited(self, _text: str):
+        self._custom_filename_edited = True
+
+    def _update_auto_export_stem(self, force: bool = False):
+        if not hasattr(self, "edit_export_name"):
+            return
+        if not force and self._custom_filename_edited:
+            return
+
+        visible_text = self.text_edit.toPlainText().strip() if hasattr(self, "text_edit") else ""
+        stem = build_default_export_stem(
+            visible_text=visible_text,
+            timeline=self.timeline,
+            phonetic_mode=self.is_phonetic_mode(),
+        )
+        self.edit_export_name.blockSignals(True)
+        self.edit_export_name.setText(stem)
+        self.edit_export_name.blockSignals(False)
+        if force:
+            self._custom_filename_edited = False
+
+    def open_file_in_explorer(self, file_path: str):
+        norm_path = os.path.normpath(file_path)
+        try:
+            if os.path.exists(norm_path):
+                subprocess.Popen(["explorer", "/select,", norm_path])
+            elif os.path.isdir(os.path.dirname(norm_path)):
+                os.startfile(os.path.dirname(norm_path))
+        except Exception:
+            pass
 
     # ---------------------------------------------------------------------
     # Phonetic Reading Mode & Auto-Detect Toggles
@@ -902,6 +1089,7 @@ class CyberTtsPlayer(QWidget):
 
             if display_text:
                 self.set_plain_editor_text(display_text)
+                self._update_auto_export_stem(force=True)
 
             if auto_play and display_text:
                 self.play_audio(target_loops=target_loops, progressive=progressive)
@@ -928,6 +1116,7 @@ class CyberTtsPlayer(QWidget):
                 font_size=self.spin_font_size.value(),
                 is_dark=(self.transparency > 0),
             )
+            self._update_auto_export_stem(force=True)
 
         if auto_play and display_text:
             self.play_audio(target_loops=target_loops, progressive=progressive)
@@ -1000,6 +1189,7 @@ class CyberTtsPlayer(QWidget):
         self.slider_progress.setEnabled(False)
         self.slider_progress.setValue(0)
         self.lbl_time.setText("00:00 / 00:00")
+        self._update_auto_export_stem(force=True)
 
     def on_sentence_double_clicked(self, char_pos: int):
         if not self.timeline or self.current_audio is None:
@@ -1438,12 +1628,17 @@ class CyberTtsPlayer(QWidget):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
-            if self.loop_segment is not None:
+            if hasattr(self, "edit_export_name") and self.edit_export_name.hasFocus():
+                self.edit_export_name.clearFocus()
+            elif self.loop_segment is not None:
                 self.clear_sentence_loop()
             else:
                 self.hide()
             event.accept()
         elif event.key() == Qt.Key_Space:
+            if hasattr(self, "edit_export_name") and self.edit_export_name.hasFocus():
+                super().keyPressEvent(event)
+                return
             self.toggle_stop_or_resume()
             event.accept()
         elif event.modifiers() == Qt.ControlModifier and event.key() in (Qt.Key_Up, Qt.Key_Down):
@@ -1459,11 +1654,11 @@ class CyberTtsPlayer(QWidget):
                 progressive=self.is_progressive_index(idx),
             )
             event.accept()
-        elif event.modifiers() == (Qt.ControlModifier | Qt.ShiftModifier) and event.key() == Qt.Key_S:
+        elif event.modifiers() in (
+            Qt.ControlModifier,
+            Qt.ControlModifier | Qt.ShiftModifier,
+        ) and event.key() == Qt.Key_S:
             self.export_netease_mp3()
-            event.accept()
-        elif event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_S:
-            self.save_audio_file()
             event.accept()
         elif event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_R:
             self.reload_application()
@@ -1489,6 +1684,7 @@ class CyberTtsPlayer(QWidget):
         words = len(clean_tts.split()) if clean_tts else 0
         chars = len(clean_tts)
         self.lbl_stats.setText(f"Words: {words} | Chars: {chars}")
+        self._update_auto_export_stem(force=False)
 
     def on_split_mode_toggled(self, checked: bool):
         self.save_user_preferences()
@@ -1609,6 +1805,7 @@ class CyberTtsPlayer(QWidget):
         self.timeline = result_dict.get("timeline", [])
         self.total_duration = len(self.current_audio) / SAMPLE_RATE
         self.slider_progress.setEnabled(True)
+        self._update_auto_export_stem(force=False)
         self.start_playback(from_sec=0.0)
 
     def start_playback(self, from_sec: float = 0.0):
@@ -1759,35 +1956,6 @@ class CyberTtsPlayer(QWidget):
             target_sec = ratio * self.total_duration
             self.start_playback(from_sec=target_sec)
 
-    def save_audio_file(self):
-        if self.current_audio is None or len(self.current_audio) == 0:
-            QMessageBox.information(
-                self, "Notice", "No synthesized audio available. Please enter text and synthesize first."
-            )
-            return
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Audio", "synthesized_speech.wav", "Audio Files (*.wav)"
-        )
-        if not file_path:
-            return
-
-        try:
-            scaled = np.clip(self.current_audio, -1.0, 1.0) * 32767.0
-            int16_audio = scaled.astype(np.int16)
-
-            with wave.open(file_path, "wb") as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(SAMPLE_RATE)
-                wf.writeframes(int16_audio.tobytes())
-
-            QMessageBox.information(
-                self, "Success", f"Audio file exported successfully to:\n{file_path}"
-            )
-        except Exception as e:
-            QMessageBox.critical(self, "Export Error", f"Failed to export audio: {e}")
-
     def export_netease_mp3(self):
         if self.current_audio is None or len(self.current_audio) == 0:
             QMessageBox.information(
@@ -1799,35 +1967,40 @@ class CyberTtsPlayer(QWidget):
 
         visible_text = self.text_edit.toPlainText().strip()
         phonetic_mode = self.is_phonetic_mode()
-        default_stem = build_default_export_stem(
-            visible_text=visible_text,
-            timeline=self.timeline,
-            phonetic_mode=phonetic_mode,
+
+        target_dir = (
+            self.export_dir
+            if self.export_dir and os.path.isdir(self.export_dir)
+            else APP_ROOT_DIR
         )
+        self.export_dir = target_dir
+        self._refresh_export_dir_ui()
 
-        last_dir = self.settings.value("last_export_dir", "", type=str)
-        suggested_path = (
-            os.path.join(last_dir, f"{default_stem}.mp3")
-            if last_dir and os.path.isdir(last_dir)
-            else f"{default_stem}.mp3"
+        raw_name = self.edit_export_name.text().strip()
+        if raw_name:
+            stem = sanitize_export_stem(raw_name, fallback="kokoro_speech")
+        else:
+            stem = build_default_export_stem(
+                visible_text=visible_text,
+                timeline=self.timeline,
+                phonetic_mode=phonetic_mode,
+            )
+
+        self.edit_export_name.blockSignals(True)
+        self.edit_export_name.setText(stem)
+        self.edit_export_name.blockSignals(False)
+
+        cover_path = (
+            self.export_cover_path
+            if self.export_cover_path and os.path.isfile(self.export_cover_path)
+            else TRAY_ICON_PATH
         )
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export NetEase Cloud Music MP3 (Confirm Filename)",
-            suggested_path,
-            "MP3 Audio (*.mp3)",
-        )
-        if not file_path:
-            return
-
-        if not file_path.lower().endswith(".mp3"):
-            file_path += ".mp3"
-
-        self.settings.setValue("last_export_dir", os.path.dirname(file_path))
-        self.settings.sync()
+        if cover_path != self.export_cover_path:
+            self.export_cover_path = cover_path
+            self._refresh_cover_ui()
 
         try:
+            file_path = resolve_unique_mp3_path(target_dir, stem)
             loop_count = export_netease_mp3_file(
                 file_path=file_path,
                 audio=self.current_audio,
@@ -1835,20 +2008,33 @@ class CyberTtsPlayer(QWidget):
                 visible_text=visible_text,
                 phonetic_mode=phonetic_mode,
                 artist=DEFAULT_EXPORT_ARTIST,
-                cover_path=TRAY_ICON_PATH,
+                cover_path=cover_path,
             )
+            self.save_user_preferences()
+
             single_dur = len(self.current_audio) / float(SAMPLE_RATE)
-            QMessageBox.information(
-                self,
-                "NetEase MP3 Exported",
-                f"Exported successfully to:\n{file_path}\n\n"
+            cover_name = os.path.basename(cover_path) if cover_path else "tts.png"
+
+            msg_box = QMessageBox(self)
+            msg_box.setIcon(QMessageBox.Information)
+            msg_box.setWindowTitle("Export Completed")
+            msg_box.setText(
+                f"MP3 exported successfully to:\n{file_path}\n\n"
                 f"• Duration: {single_dur:.1f}s × {loop_count} loop(s)\n"
                 f"• Lyrics: Embedded synced LRC (clean text)\n"
-                f"• Artist: {DEFAULT_EXPORT_ARTIST}",
+                f"• Cover: {cover_name}\n\n"
+                f"Would you like to open the file location?"
             )
+            btn_open = msg_box.addButton("Open Folder", QMessageBox.AcceptRole)
+            msg_box.addButton("Close", QMessageBox.RejectRole)
+            msg_box.setDefaultButton(btn_open)
+            msg_box.exec_()
+
+            if msg_box.clickedButton() == btn_open:
+                self.open_file_in_explorer(file_path)
         except Exception as e:
             QMessageBox.critical(
-                self, "Export Error", f"Failed to export NetEase MP3:\n{e}"
+                self, "Export Error", f"Failed to export MP3:\n{e}"
             )
 
     # ---------------------------------------------------------------------
@@ -1863,8 +2049,8 @@ class CyberTtsPlayer(QWidget):
             self.settings.sync()
 
         saved_width = self.settings.value("win_width", 940, type=int)
-        saved_height = self.settings.value("win_height", 650, type=int)
-        self.resize(max(720, saved_width), max(520, saved_height))
+        saved_height = self.settings.value("win_height", 660, type=int)
+        self.resize(max(720, saved_width), max(560, saved_height))
 
         saved_sizes = self.settings.value("splitter_sizes")
         if saved_sizes:
@@ -1873,9 +2059,9 @@ class CyberTtsPlayer(QWidget):
                 if len(sizes) == 2 and sum(sizes) > 0:
                     self.splitter.setSizes(sizes)
             except Exception:
-                self.splitter.setSizes([665, 275])
+                self.splitter.setSizes([660, 280])
         else:
-            self.splitter.setSizes([665, 275])
+            self.splitter.setSizes([660, 280])
 
         # Both IPA mode and Auto-Detect start OFF by default
         self.btn_phonetic_mode.setChecked(False)
@@ -1945,6 +2131,19 @@ class CyberTtsPlayer(QWidget):
         font_size = self.settings.value("font_size", 18, type=int)
         self.spin_font_size.setValue(font_size)
 
+        saved_cover = self.settings.value("export_cover_path", TRAY_ICON_PATH, type=str)
+        self.export_cover_path = (
+            saved_cover if saved_cover and os.path.isfile(saved_cover) else TRAY_ICON_PATH
+        )
+        self._refresh_cover_ui()
+
+        saved_dir = self.settings.value("last_export_dir", APP_ROOT_DIR, type=str)
+        self.export_dir = (
+            saved_dir if saved_dir and os.path.isdir(saved_dir) else APP_ROOT_DIR
+        )
+        self._refresh_export_dir_ui()
+        self._update_auto_export_stem(force=True)
+
         saved_transp = self.settings.value("win_transparency", 30, type=int)
         clamped_t = clamp_transparency(saved_transp)
         self.slider_opacity.setValue(clamped_t)
@@ -1982,4 +2181,8 @@ class CyberTtsPlayer(QWidget):
             self.settings.setValue("font_size", self.spin_font_size.value())
         if hasattr(self, "slider_opacity"):
             self.settings.setValue("win_transparency", self.slider_opacity.value())
+        if self.export_cover_path:
+            self.settings.setValue("export_cover_path", self.export_cover_path)
+        if self.export_dir:
+            self.settings.setValue("last_export_dir", self.export_dir)
         self.settings.sync()

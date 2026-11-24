@@ -243,14 +243,14 @@ class CyberHelpDialog(QDialog):
             "<code>[phonetic]</code>, <code>‿</code>, <code>/</code>) renders cleanly on screen while TTS reads pure English.<br>"
             "• <b>Multi-Speaker Dialogue</b>: Lines starting with <code>W:</code> / <code>M:</code> automatically switch between Female and Male voices.<br>"
             "• <b>2-Column Drill Cards</b>: Markdown tables, trap lists, or linked chunks auto-populate clickable 0.85x drill cards.<br>"
-            "• <b>NetEase MP3 Export</b>: Exports single MP3 with embedded synced LRC lyrics (<5s: 3x, <20s: 2x, ≥20s: 1x).<br>"
+            "• <b>Direct NetEase MP3 Export</b>: Exports single MP3 with embedded synced LRC lyrics and customizable Cover, Folder & Name (<5s: 3x, <20s: 2x, ≥20s: 1x; auto-numbered on conflict).<br>"
             "• <b>Adjustable Transparency</b>: Adjust window transparency (0%–95%) via Settings or <code>Ctrl+Up/Down</code>.<br><br>"
             "<b>[ Interactive Controls & Shortcuts ]</b><br>"
             "• <b>Double-Click Sentence</b>: Loop single sentence continuously (Esc or badge to exit)<br>"
             "• <b>Select Phrase + Alt+P</b>: Instantly read highlighted chunk at 0.85x<br>"
             "• <b>Ctrl + Up / Down</b>: Adjust Window Transparency (±5%)<br>"
             "• <b>Space</b>: Pause / Resume Playback  |  <b>Ctrl + Enter</b>: Synthesize & Play<br>"
-            "• <b>Ctrl + S</b>: Export WAV  |  <b>Ctrl + Shift + S</b>: Export NetEase MP3<br>"
+            "• <b>Ctrl + S / Ctrl + Shift + S</b>: Export NetEase MP3<br>"
             "• <b>Ctrl + R</b>: Reload  |  <b>Esc</b>: Minimize to Tray"
         )
         info.setTextFormat(Qt.RichText)

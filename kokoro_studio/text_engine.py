@@ -295,6 +295,23 @@ def sanitize_text(text: str, phonetic_mode: bool = False) -> str:
     return "\n".join(lines).strip()
 
 
+def sanitize_export_stem(raw_stem: str, fallback: str = "kokoro_speech") -> str:
+    """Sanitize any user-provided or auto-generated filename stem into a Windows-safe name."""
+    text = str(raw_stem or "").strip()
+    if text.lower().endswith(".mp3"):
+        text = text[:-4].strip()
+
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', " ", text)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+    if not cleaned:
+        return fallback
+
+    if cleaned.upper() in WINDOWS_RESERVED_NAMES:
+        cleaned = f"{cleaned}_audio"
+
+    return cleaned
+
+
 def build_default_export_stem(
     visible_text: str,
     timeline: list = None,
@@ -334,14 +351,7 @@ def build_default_export_stem(
         chosen.append(w)
         total_len += add_len
 
-    stem = " ".join(chosen).strip(" .")
-    if not stem:
-        return "kokoro_speech"
-
-    if stem.upper() in WINDOWS_RESERVED_NAMES:
-        stem = f"{stem}_audio"
-
-    return stem
+    return sanitize_export_stem(" ".join(chosen), fallback="kokoro_speech")
 
 
 def has_learning_annotations(text: str) -> bool:

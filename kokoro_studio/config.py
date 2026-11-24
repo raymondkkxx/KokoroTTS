@@ -147,6 +147,7 @@ def build_main_stylesheet(transparency: int = 30, is_setting_open: bool = False)
         popup_bd = "1px solid #D4D4D8"
         setting_panel_bg = "#FAFAFA"
         setting_panel_bd = "1px solid #E4E4E7"
+        input_bd = "1px solid #E4E4E7"
     else:
         alpha_main = max(16, int(round(255 * opacity_pct / 100.0)))
         alpha_panel = max(14, int(round(235 * opacity_pct / 100.0)))
@@ -177,6 +178,7 @@ def build_main_stylesheet(transparency: int = 30, is_setting_open: bool = False)
         popup_bd = "1px solid rgba(255, 255, 255, 36)"
         setting_panel_bg = f"rgba(255, 255, 255, {max(15, int(alpha_ctrl * 1.1))})"
         setting_panel_bd = f"1px solid rgba(255, 255, 255, {edge_alpha})"
+        input_bd = f"1px solid rgba(255, 255, 255, {max(14, int(edge_alpha * 0.7))})"
 
     setting_btn_bg = (
         ("rgba(244, 63, 94, 42)" if is_dark else "rgba(225, 29, 72, 24)")
@@ -210,6 +212,43 @@ QLabel#lblTimeStatus {{
     font-size: 12.5px;
     font-weight: bold;
     font-family: {FONT_STACK};
+}}
+QLabel#lblCoverThumb {{
+    background-color: {ctrl_bg};
+    border: {input_bd};
+    border-radius: 5px;
+}}
+QLabel#lblExportInfo {{
+    background-color: {ctrl_bg};
+    border: {input_bd};
+    border-radius: 7px;
+    color: {text_main};
+    padding: 4px 8px;
+    font-size: 12px;
+    font-family: {FONT_STACK};
+}}
+QLabel#lblExportExt {{
+    color: {text_sub};
+    font-size: 12px;
+    font-weight: bold;
+    font-family: {FONT_STACK};
+}}
+QLineEdit#editExportName {{
+    background-color: {ctrl_bg};
+    border: {input_bd};
+    border-radius: 7px;
+    color: {text_main};
+    padding: 4px 8px;
+    font-size: 12px;
+    font-family: {FONT_STACK};
+    selection-background-color: rgba(225, 29, 72, 36);
+    selection-color: {PALETTE_ROSE_DEEP};
+}}
+QLineEdit#editExportName:hover {{
+    background-color: {ctrl_hover};
+}}
+QLineEdit#editExportName:focus {{
+    border: 1.5px solid {PALETTE_ROSE};
 }}
 QFrame#rightPanel, QFrame#drillBarFrame {{
     background-color: {panel_bg};
@@ -306,7 +345,7 @@ QComboBox {{
     background-color: {ctrl_bg};
     border: none;
     border-radius: 7px;
-    padding: 5px 10px;
+    padding: 4px 10px;
     color: {text_main};
     font-size: 12.5px;
     font-family: {FONT_STACK};
@@ -387,8 +426,22 @@ QPushButton {{
     border-radius: 7px;
     font-size: 12.5px;
     font-weight: bold;
-    padding: 7px 10px;
+    padding: 6px 10px;
     font-family: {FONT_STACK};
+}}
+QPushButton#btnMiniTool {{
+    background-color: {ctrl_bg};
+    border: {input_bd};
+    border-radius: 7px;
+    color: {text_main};
+    font-size: 12px;
+    font-weight: bold;
+    padding: 3px 7px;
+}}
+QPushButton#btnMiniTool:hover {{
+    background-color: {ctrl_hover};
+    color: {PALETTE_ROSE};
+    border: 1px solid rgba(225, 29, 72, 90);
 }}
 QPushButton#btnPlay {{
     background-color: {PALETTE_ROSE};
