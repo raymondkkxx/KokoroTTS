@@ -197,6 +197,7 @@ class TtsSynthesizerThread(QThread):
                                     "end_char": seg["end_char"],
                                     "speaker": speaker,
                                     "speed": pass_speed,
+                                    "clean_text": seg.get("clean_text", seg["tts_text"]),
                                 }
                             )
 
@@ -248,7 +249,7 @@ class DrillSynthesizerThread(QThread):
         phonetic_mode: bool = False,
     ):
         self.phonetic_mode = phonetic_mode
-        if re_already_inline := (not phonetic_mode and "](" in phrase and "/)" in phrase):
+        if not phonetic_mode and "](" in phrase and "/)" in phrase:
             self.phrase = phrase
         else:
             self.phrase = clean_annotated_for_tts(

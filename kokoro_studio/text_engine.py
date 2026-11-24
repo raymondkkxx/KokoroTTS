@@ -47,6 +47,31 @@ ABBREVIATIONS = [
 KOKORO_VOWELS = "aeiouæɑɒɔəɚɛɜɪʊʌɐAIOWYUQ"
 KOKORO_CONSONANT_RE = r"[^\s\.,!?;:\-\(\)\[\]/ˈˌaeiouæɑɒɔəɚɛɜɪʊʌɐAIOWYUQ0-9]"
 
+WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "COM1",
+    "COM2",
+    "COM3",
+    "COM4",
+    "COM5",
+    "COM6",
+    "COM7",
+    "COM8",
+    "COM9",
+    "LPT1",
+    "LPT2",
+    "LPT3",
+    "LPT4",
+    "LPT5",
+    "LPT6",
+    "LPT7",
+    "LPT8",
+    "LPT9",
+}
+
 
 def detect_speaker(line: str):
     """Return ('F'|'M'|'DEFAULT', line_without_speaker_prefix)."""
@@ -268,6 +293,55 @@ def sanitize_text(text: str, phonetic_mode: bool = False) -> str:
         if cleaned:
             lines.append(cleaned)
     return "\n".join(lines).strip()
+
+
+def build_default_export_stem(
+    visible_text: str,
+    timeline: list = None,
+    phonetic_mode: bool = False,
+    max_words: int = 6,
+    max_chars: int = 48,
+) -> str:
+    """
+    Build a Windows-safe default filename stem from the first few clean words of the text.
+    """
+    seed_text = ""
+    if timeline:
+        for seg in timeline:
+            candidate = (seg.get("clean_text") or "").strip()
+            if candidate:
+                seed_text = candidate
+                break
+
+    if not seed_text:
+        seed_text = sanitize_text(visible_text, phonetic_mode=phonetic_mode)
+
+    # Strip Windows-forbidden filename characters and punctuation edge clutter
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', " ", seed_text)
+    cleaned = re.sub(r"[,.;!?\(\)\[\]\{\}]+", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    if not cleaned:
+        return "kokoro_speech"
+
+    words = cleaned.split(" ")[:max_words]
+    chosen = []
+    total_len = 0
+    for w in words:
+        add_len = len(w) + (1 if chosen else 0)
+        if chosen and total_len + add_len > max_chars:
+            break
+        chosen.append(w)
+        total_len += add_len
+
+    stem = " ".join(chosen).strip(" .")
+    if not stem:
+        return "kokoro_speech"
+
+    if stem.upper() in WINDOWS_RESERVED_NAMES:
+        stem = f"{stem}_audio"
+
+    return stem
 
 
 def has_learning_annotations(text: str) -> bool:
@@ -519,7 +593,13 @@ def build_timeline_segments(visible_text: str, phonetic_mode: bool = False) -> l
     """
     Map visible text in QTextEdit into aligned sentence segments:
     Returns list of dicts:
-      {"start_char": int, "end_char": int, "speaker": "F"|"M"|"DEFAULT", "tts_text": str}
+      {
+        "start_char": int,
+        "end_char": int,
+        "speaker": "F"|"M"|"DEFAULT",
+        "tts_text": str,
+        "clean_text": str,
+      }
     """
     segments = []
     if not visible_text:
@@ -543,6 +623,9 @@ def build_timeline_segments(visible_text: str, phonetic_mode: bool = False) -> l
                 tts_clean = clean_annotated_for_tts(
                     sent, phonetic_mode=phonetic_mode, inline_phonetics=True
                 )
+                pure_clean = clean_annotated_for_tts(
+                    sent, phonetic_mode=phonetic_mode, inline_phonetics=False
+                )
                 if tts_clean and re.search(r"[^\W\d_]|[0-9]", tts_clean):
                     segments.append(
                         {
@@ -550,6 +633,7 @@ def build_timeline_segments(visible_text: str, phonetic_mode: bool = False) -> l
                             "end_char": offset + end_pos,
                             "speaker": speaker,
                             "tts_text": tts_clean,
+                            "clean_text": pure_clean or tts_clean,
                         }
                     )
         offset += line_len + (1 if line_idx < len(lines) - 1 else 0)

@@ -12,6 +12,7 @@ EDGE_MARGIN = 12
 CORNER_MARGIN = 22
 HTTP_HOST = "127.0.0.1"
 HTTP_PORT = 54322
+DEFAULT_EXPORT_ARTIST = "Raymondkkxx"
 
 SINGLE_INSTANCE_KEY = "KokoroTTSPlayer_SingleInstance_Server"
 MUTEX_NAME = "Local\\KokoroTTSPlayer_SingleInstance_Mutex"
@@ -413,6 +414,16 @@ QPushButton#btnSave {{
 QPushButton#btnSave:hover {{
     background-color: {ctrl_hover};
     color: {PALETTE_ROSE};
+}}
+QPushButton#btnNetease {{
+    background-color: {ctrl_bg};
+    border: 1px solid rgba(194, 65, 12, 70);
+    color: {stats_fg};
+}}
+QPushButton#btnNetease:hover {{
+    background-color: {PALETTE_ORANGE};
+    border: 1px solid {PALETTE_ORANGE};
+    color: #FFFFFF;
 }}
 QPushButton#btnTopAction {{
     background-color: transparent;

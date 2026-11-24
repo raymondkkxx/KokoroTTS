@@ -46,9 +46,11 @@ from PyQt5.QtWidgets import (
 import sounddevice as sd
 import torch
 
+from kokoro_studio.audio_exporter import export_netease_mp3_file
 from kokoro_studio.config import (
     APP_ROOT_DIR,
     CORNER_MARGIN,
+    DEFAULT_EXPORT_ARTIST,
     EDGE_MARGIN,
     PALETTE_BLACK,
     PALETTE_ORANGE,
@@ -62,6 +64,7 @@ from kokoro_studio.config import (
 )
 from kokoro_studio.http_server import HttpServerThread
 from kokoro_studio.text_engine import (
+    build_default_export_stem,
     build_timeline_segments,
     detect_is_pure_phonetic_input,
     parse_learning_material,
@@ -721,11 +724,27 @@ class CyberTtsPlayer(QWidget):
         self.btn_stop.clicked.connect(self.toggle_stop_or_resume)
         self.btn_stop.setEnabled(False)
 
+        save_row = QHBoxLayout()
+        save_row.setSpacing(6)
+
         self.btn_save_wav = QPushButton("⭳ Save WAV")
         self.btn_save_wav.setObjectName("btnSave")
         self.btn_save_wav.setFocusPolicy(Qt.NoFocus)
-        self.btn_save_wav.setToolTip("Export as a local WAV audio file.")
+        self.btn_save_wav.setToolTip("Export as a local WAV audio file (Ctrl+S).")
         self.btn_save_wav.clicked.connect(self.save_audio_file)
+
+        self.btn_export_netease = QPushButton("🎵 Export MP3")
+        self.btn_export_netease.setObjectName("btnNetease")
+        self.btn_export_netease.setFocusPolicy(Qt.NoFocus)
+        self.btn_export_netease.setToolTip(
+            "Export MP3 with embedded LRC lyrics for NetEase Cloud Music (Ctrl+Shift+S)\n"
+            "• <5s: 3x loop | <20s: 2x loop | >=20s: 1x loop\n"
+            "• Artist: Raymondkkxx | Cover: tts.png"
+        )
+        self.btn_export_netease.clicked.connect(self.export_netease_mp3)
+
+        save_row.addWidget(self.btn_save_wav, 1)
+        save_row.addWidget(self.btn_export_netease, 1)
 
         right_layout.addLayout(mode_box)
         right_layout.addLayout(auto_limit_box)
@@ -742,7 +761,7 @@ class CyberTtsPlayer(QWidget):
         right_layout.addStretch()
         right_layout.addWidget(self.btn_play)
         right_layout.addWidget(self.btn_stop)
-        right_layout.addWidget(self.btn_save_wav)
+        right_layout.addLayout(save_row)
 
         self.splitter.addWidget(left_widget)
         self.splitter.addWidget(right_panel)
@@ -784,7 +803,7 @@ class CyberTtsPlayer(QWidget):
             self.btn_auto_ipa.setText("✨ Auto: ON")
             self.btn_auto_ipa.setToolTip(
                 "Auto-Detect IPA Mode: ON\n"
-                "• Starts with '[' or '\\'' -> Switches to IPA: ON\n"
+                "• Starts with '[' or '\\'' -> Switches to IPA: ON;\n"
                 "• Normal text (including inline [IPA] annotations) -> Uses IPA: OFF"
             )
             current_text = self.text_edit.toPlainText().strip()
@@ -1440,6 +1459,9 @@ class CyberTtsPlayer(QWidget):
                 progressive=self.is_progressive_index(idx),
             )
             event.accept()
+        elif event.modifiers() == (Qt.ControlModifier | Qt.ShiftModifier) and event.key() == Qt.Key_S:
+            self.export_netease_mp3()
+            event.accept()
         elif event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_S:
             self.save_audio_file()
             event.accept()
@@ -1765,6 +1787,69 @@ class CyberTtsPlayer(QWidget):
             )
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Failed to export audio: {e}")
+
+    def export_netease_mp3(self):
+        if self.current_audio is None or len(self.current_audio) == 0:
+            QMessageBox.information(
+                self,
+                "Notice",
+                "No synthesized audio available. Please enter text and synthesize first.",
+            )
+            return
+
+        visible_text = self.text_edit.toPlainText().strip()
+        phonetic_mode = self.is_phonetic_mode()
+        default_stem = build_default_export_stem(
+            visible_text=visible_text,
+            timeline=self.timeline,
+            phonetic_mode=phonetic_mode,
+        )
+
+        last_dir = self.settings.value("last_export_dir", "", type=str)
+        suggested_path = (
+            os.path.join(last_dir, f"{default_stem}.mp3")
+            if last_dir and os.path.isdir(last_dir)
+            else f"{default_stem}.mp3"
+        )
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export NetEase Cloud Music MP3 (Confirm Filename)",
+            suggested_path,
+            "MP3 Audio (*.mp3)",
+        )
+        if not file_path:
+            return
+
+        if not file_path.lower().endswith(".mp3"):
+            file_path += ".mp3"
+
+        self.settings.setValue("last_export_dir", os.path.dirname(file_path))
+        self.settings.sync()
+
+        try:
+            loop_count = export_netease_mp3_file(
+                file_path=file_path,
+                audio=self.current_audio,
+                timeline=self.timeline,
+                visible_text=visible_text,
+                phonetic_mode=phonetic_mode,
+                artist=DEFAULT_EXPORT_ARTIST,
+                cover_path=TRAY_ICON_PATH,
+            )
+            single_dur = len(self.current_audio) / float(SAMPLE_RATE)
+            QMessageBox.information(
+                self,
+                "NetEase MP3 Exported",
+                f"Exported successfully to:\n{file_path}\n\n"
+                f"• Duration: {single_dur:.1f}s × {loop_count} loop(s)\n"
+                f"• Lyrics: Embedded synced LRC (clean text)\n"
+                f"• Artist: {DEFAULT_EXPORT_ARTIST}",
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Export Error", f"Failed to export NetEase MP3:\n{e}"
+            )
 
     # ---------------------------------------------------------------------
     # User Preferences Persistence
