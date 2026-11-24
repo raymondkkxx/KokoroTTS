@@ -92,6 +92,7 @@ class CyberTtsPlayer(QWidget):
     def __init__(self, mutex_handle=None):
         super().__init__()
         self.mutex_handle = mutex_handle
+        self._is_loading_prefs = False
 
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(True)
@@ -322,15 +323,15 @@ class CyberTtsPlayer(QWidget):
         self.btn_phonetic_mode.toggled.connect(self.on_phonetic_mode_toggled)
         top_bar.addWidget(self.btn_phonetic_mode)
 
-        self.btn_auto_ipa = QPushButton("Auto: OFF")
+        self.btn_auto_ipa = QPushButton("✨ Auto: ON")
         self.btn_auto_ipa.setObjectName("btnAutoIpa")
         self.btn_auto_ipa.setCheckable(True)
-        self.btn_auto_ipa.setChecked(False)
+        self.btn_auto_ipa.setChecked(True)
         self.btn_auto_ipa.setFocusPolicy(Qt.NoFocus)
         self.btn_auto_ipa.setToolTip(
-            "Auto-Detect IPA Mode: OFF\n"
-            "When ON: Text starting with '[' or '\\'' switches to IPA: ON;\n"
-            "Normal sentences (including inline [IPA] annotations) use IPA: OFF"
+            "Auto-Detect IPA Mode: ON\n"
+            "• Starts with '[' or '\\'' -> Switches to IPA: ON;\n"
+            "• Normal text (including inline [IPA] annotations) -> Uses IPA: OFF"
         )
         self.btn_auto_ipa.toggled.connect(self.on_auto_ipa_toggled)
         top_bar.addWidget(self.btn_auto_ipa)
@@ -349,6 +350,14 @@ class CyberTtsPlayer(QWidget):
         btn_clear.setToolTip("Clear Text & Drill Cards")
         btn_clear.setFocusPolicy(Qt.NoFocus)
         btn_clear.clicked.connect(self.clear_all_content)
+
+        btn_reset = QPushButton("Reset")
+        btn_reset.setObjectName("btnTopAction")
+        btn_reset.setToolTip(
+            "Restore All Settings to Default (Auto: ON, 30% Glass, Default Cover & Folder)"
+        )
+        btn_reset.setFocusPolicy(Qt.NoFocus)
+        btn_reset.clicked.connect(self.reset_to_defaults)
 
         btn_reload = QPushButton("↻")
         btn_reload.setObjectName("btnTopAction")
@@ -378,6 +387,7 @@ class CyberTtsPlayer(QWidget):
         btn_close.clicked.connect(self.hide)
 
         top_bar.addWidget(btn_clear)
+        top_bar.addWidget(btn_reset)
         top_bar.addWidget(btn_reload)
         top_bar.addWidget(btn_help)
         top_bar.addWidget(btn_min)
@@ -616,9 +626,7 @@ class CyberTtsPlayer(QWidget):
         self.slider_speed.setRange(5, 20)
         self.slider_speed.setValue(10)
         self.slider_speed.setToolTip("Speed: 1.0x")
-        self.slider_speed.valueChanged.connect(
-            lambda v: self.slider_speed.setToolTip(f"Speed: {v/10:.1f}x")
-        )
+        self.slider_speed.valueChanged.connect(self.on_speed_changed)
 
         # Shadowing & Pause
         shadow_row = QHBoxLayout()
@@ -984,6 +992,7 @@ class CyberTtsPlayer(QWidget):
             )
 
         self.on_text_changed()
+        self.save_user_preferences()
 
     def on_auto_ipa_toggled(self, checked: bool):
         if checked:
@@ -1004,6 +1013,11 @@ class CyberTtsPlayer(QWidget):
                 "Auto-Detect IPA Mode: OFF\n"
                 "Click to enable automatic IPA mode detection when pasting text"
             )
+        self.save_user_preferences()
+
+    def on_speed_changed(self, value: int):
+        self.slider_speed.setToolTip(f"Speed: {value / 10.0:.1f}x")
+        self.save_user_preferences()
 
     # ---------------------------------------------------------------------
     # Adjustable Transparency & Light/Dark Glass Theme Handlers
@@ -1273,12 +1287,13 @@ class CyberTtsPlayer(QWidget):
 
         if mode_data == "auto_clipboard":
             self.tray_icon.setToolTip("Kokoro TTS Player [Mode 2: Auto Clipboard]")
-            self.tray_icon.showMessage(
-                "Switched to Mode 2",
-                f"Clipboard auto-read enabled (Limit: {self.spin_auto_limit.value()} chars, Mode: {self.combo_clip_loop.currentText()}).\nManual paste is required for larger texts.",
-                QSystemTrayIcon.Information,
-                2500,
-            )
+            if not self._is_loading_prefs:
+                self.tray_icon.showMessage(
+                    "Switched to Mode 2",
+                    f"Clipboard auto-read enabled (Limit: {self.spin_auto_limit.value()} chars, Mode: {self.combo_clip_loop.currentText()}).\nManual paste is required for larger texts.",
+                    QSystemTrayIcon.Information,
+                    2500,
+                )
         else:
             self.tray_icon.setToolTip("Kokoro TTS Player [Mode 1: Manual Mode]")
 
@@ -1410,13 +1425,14 @@ class CyberTtsPlayer(QWidget):
     def on_device_changed(self):
         selected_device = self.combo_device.currentData()
         if selected_device == "cuda" and not torch.cuda.is_available():
-            QMessageBox.warning(
-                self,
-                "CUDA Unavailable",
-                "PyTorch is currently not configured with CUDA GPU support.\n\n"
-                "To enable GPU acceleration, run:\n"
-                "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124",
-            )
+            if not self._is_loading_prefs:
+                QMessageBox.warning(
+                    self,
+                    "CUDA Unavailable",
+                    "PyTorch is currently not configured with CUDA GPU support.\n\n"
+                    "To enable GPU acceleration, run:\n"
+                    "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124",
+                )
             cpu_idx = self.combo_device.findData("cpu")
             if cpu_idx >= 0:
                 self.combo_device.setCurrentIndex(cpu_idx)
@@ -2038,123 +2054,201 @@ class CyberTtsPlayer(QWidget):
             )
 
     # ---------------------------------------------------------------------
-    # User Preferences Persistence
+    # User Preferences Persistence & One-Click Reset
     # ---------------------------------------------------------------------
+    def reset_to_defaults(self):
+        """Restore all settings to defaults (Auto: ON, 30% Glass, Default Cover & Folder) and persist."""
+        self._is_loading_prefs = True
+        try:
+            self.btn_phonetic_mode.setChecked(False)
+            self.on_phonetic_mode_toggled(False)
+
+            self.btn_auto_ipa.setChecked(True)
+            self.on_auto_ipa_toggled(True)
+
+            self.chk_split.setChecked(False)
+
+            mode_idx = self.combo_mode.findData("auto_clipboard")
+            self.combo_mode.setCurrentIndex(mode_idx if mode_idx >= 0 else 1)
+
+            self.spin_auto_limit.setValue(1000)
+
+            self.chk_always_visible.setChecked(True)
+            self.on_always_visible_toggled(True)
+
+            default_dev = "cuda" if torch.cuda.is_available() else "cpu"
+            dev_idx = self.combo_device.findData(default_dev)
+            if dev_idx >= 0:
+                self.combo_device.setCurrentIndex(dev_idx)
+
+            self.combo_voice.setCurrentIndex(0)
+            m_idx = self.combo_male_voice.findText("am_michael", Qt.MatchStartsWith)
+            if m_idx >= 0:
+                self.combo_male_voice.setCurrentIndex(m_idx)
+
+            self.slider_speed.setValue(10)
+            self.chk_shadowing.setChecked(False)
+            self.spin_pause.setValue(2)
+
+            if self.combo_push_loop.count() > 2:
+                self.combo_push_loop.setCurrentIndex(2)
+            if self.combo_clip_loop.count() > 0:
+                self.combo_clip_loop.setCurrentIndex(0)
+
+            self.spin_font_size.setValue(18)
+
+            self.export_cover_path = TRAY_ICON_PATH
+            self._refresh_cover_ui()
+
+            self.export_dir = APP_ROOT_DIR
+            self._refresh_export_dir_ui()
+            self._update_auto_export_stem(force=True)
+
+            self.slider_opacity.setValue(30)
+            self.on_transparency_changed(30)
+        finally:
+            self._is_loading_prefs = False
+
+        self.save_user_preferences()
+
     def load_user_preferences(self):
-        # One-time migration to apply defaults (30% transparency & Auto Clipboard mode)
-        if not self.settings.value("v3_2_defaults_migrated", False, type=bool):
-            self.settings.setValue("win_transparency", 30)
-            self.settings.setValue("work_mode", "auto_clipboard")
-            self.settings.setValue("v3_2_defaults_migrated", True)
-            self.settings.sync()
+        self._is_loading_prefs = True
+        try:
+            # One-time migrations for baseline defaults
+            if not self.settings.value("v3_2_defaults_migrated", False, type=bool):
+                self.settings.setValue("win_transparency", 30)
+                self.settings.setValue("work_mode", "auto_clipboard")
+                self.settings.setValue("v3_2_defaults_migrated", True)
+                self.settings.sync()
 
-        saved_width = self.settings.value("win_width", 940, type=int)
-        saved_height = self.settings.value("win_height", 660, type=int)
-        self.resize(max(720, saved_width), max(560, saved_height))
+            if not self.settings.value("v3_3_auto_ipa_default_migrated", False, type=bool):
+                self.settings.setValue("auto_ipa_enabled", True)
+                self.settings.setValue("v3_3_auto_ipa_default_migrated", True)
+                self.settings.sync()
 
-        saved_sizes = self.settings.value("splitter_sizes")
-        if saved_sizes:
-            try:
-                sizes = [int(s) for s in saved_sizes]
-                if len(sizes) == 2 and sum(sizes) > 0:
-                    self.splitter.setSizes(sizes)
-            except Exception:
+            saved_width = self.settings.value("win_width", 940, type=int)
+            saved_height = self.settings.value("win_height", 660, type=int)
+            self.resize(max(720, saved_width), max(560, saved_height))
+
+            saved_sizes = self.settings.value("splitter_sizes")
+            if saved_sizes:
+                try:
+                    sizes = [int(s) for s in saved_sizes]
+                    if len(sizes) == 2 and sum(sizes) > 0:
+                        self.splitter.setSizes(sizes)
+                except Exception:
+                    self.splitter.setSizes([660, 280])
+            else:
                 self.splitter.setSizes([660, 280])
-        else:
-            self.splitter.setSizes([660, 280])
 
-        # Both IPA mode and Auto-Detect start OFF by default
-        self.btn_phonetic_mode.setChecked(False)
-        self.on_phonetic_mode_toggled(False)
-        self.btn_auto_ipa.setChecked(False)
-        self.on_auto_ipa_toggled(False)
+            # Load IPA & Auto-Detect IPA modes (Auto defaults to ON)
+            saved_phonetic = self.settings.value("phonetic_mode_enabled", False, type=bool)
+            self.btn_phonetic_mode.setChecked(saved_phonetic)
+            self.on_phonetic_mode_toggled(saved_phonetic)
 
-        self.chk_split.setChecked(
-            self.settings.value("sentence_split", False, type=bool)
-        )
+            saved_auto_ipa = self.settings.value("auto_ipa_enabled", True, type=bool)
+            self.btn_auto_ipa.setChecked(saved_auto_ipa)
+            self.on_auto_ipa_toggled(saved_auto_ipa)
 
-        saved_mode = self.settings.value("work_mode", "auto_clipboard", type=str)
-        mode_idx = self.combo_mode.findData(saved_mode)
-        if mode_idx >= 0:
-            self.combo_mode.setCurrentIndex(mode_idx)
-        else:
-            self.combo_mode.setCurrentIndex(1)
-
-        if hasattr(self, "act_mode1") and hasattr(self, "act_mode2"):
-            cur_mode = self.combo_mode.currentData()
-            self.act_mode1.setChecked(cur_mode == "manual")
-            self.act_mode2.setChecked(cur_mode == "auto_clipboard")
-
-        auto_limit = self.settings.value("auto_max_chars", 1000, type=int)
-        self.spin_auto_limit.setValue(auto_limit)
-
-        is_always_vis = self.settings.value("always_visible", True, type=bool)
-        self.chk_always_visible.setChecked(is_always_vis)
-        self.on_always_visible_toggled(is_always_vis)
-
-        default_dev = "cuda" if torch.cuda.is_available() else "cpu"
-        saved_dev = self.settings.value("device", default_dev, type=str)
-        dev_idx = self.combo_device.findData(saved_dev)
-        if dev_idx >= 0:
-            self.combo_device.setCurrentIndex(dev_idx)
-
-        saved_voice_name = self.settings.value("voice_name", "")
-        if saved_voice_name:
-            idx = self.combo_voice.findText(saved_voice_name, Qt.MatchStartsWith)
-            if idx >= 0:
-                self.combo_voice.setCurrentIndex(idx)
-        else:
-            self.combo_voice.setCurrentIndex(
-                self.settings.value("voice_idx", 0, type=int)
+            self.chk_split.setChecked(
+                self.settings.value("sentence_split", False, type=bool)
             )
 
-        saved_male_name = self.settings.value("male_voice_name", "am_michael")
-        m_idx = self.combo_male_voice.findText(saved_male_name, Qt.MatchStartsWith)
-        if m_idx >= 0:
-            self.combo_male_voice.setCurrentIndex(m_idx)
+            saved_mode = self.settings.value("work_mode", "auto_clipboard", type=str)
+            mode_idx = self.combo_mode.findData(saved_mode)
+            if mode_idx >= 0:
+                self.combo_mode.setCurrentIndex(mode_idx)
+            else:
+                self.combo_mode.setCurrentIndex(1)
 
-        self.slider_speed.setValue(self.settings.value("speed", 10, type=int))
-        self.chk_shadowing.setChecked(
-            self.settings.value("shadowing", False, type=bool)
-        )
-        self.spin_pause.setValue(
-            self.settings.value("pause_sec", 2, type=int)
-        )
+            if hasattr(self, "act_mode1") and hasattr(self, "act_mode2"):
+                cur_mode = self.combo_mode.currentData()
+                self.act_mode1.setChecked(cur_mode == "manual")
+                self.act_mode2.setChecked(cur_mode == "auto_clipboard")
 
-        push_loop = self.settings.value("push_loop_idx", 2, type=int)
-        clip_loop = self.settings.value("clip_loop_idx", 0, type=int)
-        if push_loop < self.combo_push_loop.count():
-            self.combo_push_loop.setCurrentIndex(push_loop)
-        if clip_loop < self.combo_clip_loop.count():
-            self.combo_clip_loop.setCurrentIndex(clip_loop)
+            auto_limit = self.settings.value("auto_max_chars", 1000, type=int)
+            self.spin_auto_limit.setValue(auto_limit)
 
-        font_size = self.settings.value("font_size", 18, type=int)
-        self.spin_font_size.setValue(font_size)
+            is_always_vis = self.settings.value("always_visible", True, type=bool)
+            self.chk_always_visible.setChecked(is_always_vis)
+            self.on_always_visible_toggled(is_always_vis)
 
-        saved_cover = self.settings.value("export_cover_path", TRAY_ICON_PATH, type=str)
-        self.export_cover_path = (
-            saved_cover if saved_cover and os.path.isfile(saved_cover) else TRAY_ICON_PATH
-        )
-        self._refresh_cover_ui()
+            default_dev = "cuda" if torch.cuda.is_available() else "cpu"
+            saved_dev = self.settings.value("device", default_dev, type=str)
+            dev_idx = self.combo_device.findData(saved_dev)
+            if dev_idx >= 0:
+                self.combo_device.setCurrentIndex(dev_idx)
 
-        saved_dir = self.settings.value("last_export_dir", APP_ROOT_DIR, type=str)
-        self.export_dir = (
-            saved_dir if saved_dir and os.path.isdir(saved_dir) else APP_ROOT_DIR
-        )
-        self._refresh_export_dir_ui()
-        self._update_auto_export_stem(force=True)
+            saved_voice_name = self.settings.value("voice_name", "", type=str)
+            if saved_voice_name:
+                idx = self.combo_voice.findText(saved_voice_name, Qt.MatchStartsWith)
+                if idx >= 0:
+                    self.combo_voice.setCurrentIndex(idx)
+            else:
+                self.combo_voice.setCurrentIndex(
+                    self.settings.value("voice_idx", 0, type=int)
+                )
 
-        saved_transp = self.settings.value("win_transparency", 30, type=int)
-        clamped_t = clamp_transparency(saved_transp)
-        self.slider_opacity.setValue(clamped_t)
-        self.on_transparency_changed(clamped_t)
+            saved_male_name = self.settings.value("male_voice_name", "am_michael", type=str)
+            m_idx = self.combo_male_voice.findText(saved_male_name, Qt.MatchStartsWith)
+            if m_idx >= 0:
+                self.combo_male_voice.setCurrentIndex(m_idx)
+
+            self.slider_speed.setValue(self.settings.value("speed", 10, type=int))
+            self.chk_shadowing.setChecked(
+                self.settings.value("shadowing", False, type=bool)
+            )
+            self.spin_pause.setValue(
+                self.settings.value("pause_sec", 2, type=int)
+            )
+
+            push_loop = self.settings.value("push_loop_idx", 2, type=int)
+            clip_loop = self.settings.value("clip_loop_idx", 0, type=int)
+            if push_loop < self.combo_push_loop.count():
+                self.combo_push_loop.setCurrentIndex(push_loop)
+            if clip_loop < self.combo_clip_loop.count():
+                self.combo_clip_loop.setCurrentIndex(clip_loop)
+
+            font_size = self.settings.value("font_size", 18, type=int)
+            self.spin_font_size.setValue(font_size)
+
+            saved_cover = self.settings.value("export_cover_path", TRAY_ICON_PATH, type=str)
+            if saved_cover and os.path.isfile(saved_cover):
+                self.export_cover_path = os.path.normpath(saved_cover)
+            else:
+                self.export_cover_path = TRAY_ICON_PATH
+            self._refresh_cover_ui()
+
+            saved_dir = self.settings.value("last_export_dir", APP_ROOT_DIR, type=str)
+            if saved_dir and os.path.isdir(saved_dir):
+                self.export_dir = os.path.normpath(saved_dir)
+            else:
+                self.export_dir = APP_ROOT_DIR
+            self._refresh_export_dir_ui()
+            self._update_auto_export_stem(force=True)
+
+            saved_transp = self.settings.value("win_transparency", 30, type=int)
+            clamped_t = clamp_transparency(saved_transp)
+            self.slider_opacity.setValue(clamped_t)
+            self.on_transparency_changed(clamped_t)
+        finally:
+            self._is_loading_prefs = False
+
+        self.save_user_preferences()
 
     def save_user_preferences(self):
+        if getattr(self, "_is_loading_prefs", False):
+            return
+
         if not self.isMinimized() and not self.isMaximized():
             self.settings.setValue("win_width", self.width())
             self.settings.setValue("win_height", self.height())
         if hasattr(self, "splitter"):
             self.settings.setValue("splitter_sizes", self.splitter.sizes())
+        if hasattr(self, "btn_phonetic_mode"):
+            self.settings.setValue("phonetic_mode_enabled", self.btn_phonetic_mode.isChecked())
+        if hasattr(self, "btn_auto_ipa"):
+            self.settings.setValue("auto_ipa_enabled", self.btn_auto_ipa.isChecked())
         self.settings.setValue("sentence_split", self.chk_split.isChecked())
         if hasattr(self, "combo_mode"):
             self.settings.setValue("work_mode", self.combo_mode.currentData())
@@ -2182,7 +2276,7 @@ class CyberTtsPlayer(QWidget):
         if hasattr(self, "slider_opacity"):
             self.settings.setValue("win_transparency", self.slider_opacity.value())
         if self.export_cover_path:
-            self.settings.setValue("export_cover_path", self.export_cover_path)
+            self.settings.setValue("export_cover_path", os.path.normpath(self.export_cover_path))
         if self.export_dir:
-            self.settings.setValue("last_export_dir", self.export_dir)
+            self.settings.setValue("last_export_dir", os.path.normpath(self.export_dir))
         self.settings.sync()

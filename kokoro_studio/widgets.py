@@ -200,7 +200,7 @@ class CyberHelpDialog(QDialog):
             Qt.FramelessWindowHint | Qt.Dialog | Qt.WindowStaysOnTopHint
         )
         self.drag_pos = QPoint()
-        self.resize(580, 600)
+        self.resize(580, 610)
         self.setStyleSheet(f"""
             QDialog {{
                 background-color: #FFFFFF;
@@ -241,10 +241,11 @@ class CyberHelpDialog(QDialog):
             "<b>[ Smart Listening & Annotation Engine ]</b><br>"
             "• <b>Dual-Track Rendering</b>: Visual markup (<code>**stress**</code>, <code>(silent)</code>, "
             "<code>[phonetic]</code>, <code>‿</code>, <code>/</code>) renders cleanly on screen while TTS reads pure English.<br>"
+            "• <b>Auto IPA Detection (Default ON)</b>: Automatically switches to full IPA mode when pasting pure phonetic notation while keeping normal text in inline-IPA mode.<br>"
             "• <b>Multi-Speaker Dialogue</b>: Lines starting with <code>W:</code> / <code>M:</code> automatically switch between Female and Male voices.<br>"
             "• <b>2-Column Drill Cards</b>: Markdown tables, trap lists, or linked chunks auto-populate clickable 0.85x drill cards.<br>"
-            "• <b>Direct NetEase MP3 Export</b>: Exports single MP3 with embedded synced LRC lyrics and customizable Cover, Folder & Name (<5s: 3x, <20s: 2x, ≥20s: 1x; auto-numbered on conflict).<br>"
-            "• <b>Adjustable Transparency</b>: Adjust window transparency (0%–95%) via Settings or <code>Ctrl+Up/Down</code>.<br><br>"
+            "• <b>Direct NetEase MP3 Export</b>: Exports single MP3 with embedded synced LRC lyrics and persistent Cover, Folder & Name (<5s: 3x, <20s: 2x, ≥20s: 1x; auto-numbered on conflict).<br>"
+            "• <b>One-Click Reset</b>: Click <code>Reset</code> in the top bar anytime to restore default settings (Auto: ON, 30% Glass, default cover & folder).<br><br>"
             "<b>[ Interactive Controls & Shortcuts ]</b><br>"
             "• <b>Double-Click Sentence</b>: Loop single sentence continuously (Esc or badge to exit)<br>"
             "• <b>Select Phrase + Alt+P</b>: Instantly read highlighted chunk at 0.85x<br>"
