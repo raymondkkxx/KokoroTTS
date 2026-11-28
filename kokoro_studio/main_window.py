@@ -89,10 +89,12 @@ class CyberTtsPlayer(QWidget):
     mode_change_signal = pyqtSignal(str)
     opacity_change_signal = pyqtSignal(str)
 
-    def __init__(self, mutex_handle=None):
+    def __init__(self, mutex_handle=None, silent_start: bool = False):
         super().__init__()
         self.mutex_handle = mutex_handle
         self._is_loading_prefs = False
+        self._silent_start = bool(silent_start)
+        self._current_request_silent = bool(silent_start)
 
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(True)
@@ -238,6 +240,7 @@ class CyberTtsPlayer(QWidget):
             auto_play=True,
             target_loops=target_loops,
             progressive=is_prog,
+            silent=not self.isVisible(),
         )
 
     # ---------------------------------------------------------------------
@@ -804,6 +807,7 @@ class CyberTtsPlayer(QWidget):
                 progressive=self.is_progressive_index(
                     self.combo_push_loop.currentIndex()
                 ),
+                silent=False,
             )
         )
 
@@ -1075,7 +1079,12 @@ class CyberTtsPlayer(QWidget):
         self.on_text_changed()
 
     def ingest_learning_text(
-        self, raw_payload, auto_play=False, target_loops=None, progressive=False
+        self,
+        raw_payload,
+        auto_play=False,
+        target_loops=None,
+        progressive=False,
+        silent: bool = False,
     ):
         if self.is_auto_ipa_enabled():
             detected_ipa = detect_is_pure_phonetic_input(raw_payload)
@@ -1106,7 +1115,11 @@ class CyberTtsPlayer(QWidget):
                 self._update_auto_export_stem(force=True)
 
             if auto_play and display_text:
-                self.play_audio(target_loops=target_loops, progressive=progressive)
+                self.play_audio(
+                    target_loops=target_loops,
+                    progressive=progressive,
+                    silent=silent,
+                )
             return
 
         parsed = parse_learning_material(raw_payload)
@@ -1133,7 +1146,11 @@ class CyberTtsPlayer(QWidget):
             self._update_auto_export_stem(force=True)
 
         if auto_play and display_text:
-            self.play_audio(target_loops=target_loops, progressive=progressive)
+            self.play_audio(
+                target_loops=target_loops,
+                progressive=progressive,
+                silent=silent,
+            )
 
     def populate_drill_cards(self, drills: list):
         while self.drill_grid.count():
@@ -1313,7 +1330,7 @@ class CyberTtsPlayer(QWidget):
             flags |= Qt.WindowStaysOnTopHint
 
         self.setWindowFlags(flags)
-        if checked:
+        if checked and not (self._is_loading_prefs and self._silent_start):
             self.show()
             self.force_bring_to_foreground()
         self.save_user_preferences()
@@ -1328,14 +1345,15 @@ class CyberTtsPlayer(QWidget):
         client = self.local_server.nextPendingConnection()
         if client:
             client.readyRead.connect(lambda: self.handle_single_instance_msg(client))
-            self.force_bring_to_foreground()
 
     def handle_single_instance_msg(self, client):
+        raw_msg = b""
         try:
-            client.readAll()
+            raw_msg = bytes(client.readAll()).strip()
         except Exception:
             pass
-        self.force_bring_to_foreground()
+        if raw_msg != b"SILENT":
+            self.force_bring_to_foreground()
         client.disconnectFromServer()
 
     def init_tray_icon(self):
@@ -1382,6 +1400,7 @@ class CyberTtsPlayer(QWidget):
         if self.isVisible() and not self.isMinimized():
             self.hide()
         else:
+            self._current_request_silent = False
             self.force_bring_to_foreground()
 
     def on_tray_activated(self, reason):
@@ -1668,6 +1687,7 @@ class CyberTtsPlayer(QWidget):
             self.play_audio(
                 target_loops=self.get_loop_count_from_index(idx),
                 progressive=self.is_progressive_index(idx),
+                silent=False,
             )
             event.accept()
         elif event.modifiers() in (
@@ -1733,23 +1753,35 @@ class CyberTtsPlayer(QWidget):
             self.btn_play.setText("▶ Loading Model...")
 
     def on_ahk_text_received(self, payload):
-        dismiss_external_osd()
-        QTimer.singleShot(250, dismiss_external_osd)
+        is_silent = False
+        actual_payload = payload
+        if isinstance(payload, dict):
+            is_silent = bool(payload.get("silent", False))
+            if set(payload.keys()) <= {"text", "silent"} and "text" in payload:
+                actual_payload = payload["text"]
 
-        self.force_bring_to_foreground()
+        self._current_request_silent = is_silent
+
+        if not is_silent:
+            dismiss_external_osd()
+            QTimer.singleShot(250, dismiss_external_osd)
+            self.force_bring_to_foreground()
+
         idx = self.combo_push_loop.currentIndex()
         self.ingest_learning_text(
-            payload,
+            actual_payload,
             auto_play=True,
             target_loops=self.get_loop_count_from_index(idx),
             progressive=self.is_progressive_index(idx),
+            silent=is_silent,
         )
 
-    def play_audio(self, target_loops=None, progressive=False):
+    def play_audio(self, target_loops=None, progressive=False, silent: bool = False):
         visible_text = self.text_edit.toPlainText().strip()
         if not visible_text:
             return
 
+        self._current_request_silent = bool(silent)
         phonetic_mode = self.is_phonetic_mode()
 
         if self.chk_split.isChecked():
@@ -1800,7 +1832,7 @@ class CyberTtsPlayer(QWidget):
         self.lbl_time.setText("00:00 / 00:00")
         self.current_loop = 1
 
-        if self.chk_always_visible.isChecked():
+        if not self._current_request_silent and self.chk_always_visible.isChecked():
             self.force_bring_to_foreground()
             self.text_edit.setFocus()
 
@@ -1844,16 +1876,23 @@ class CyberTtsPlayer(QWidget):
         self.btn_play.setText("▶ Playing")
         self.btn_play.setEnabled(False)
 
-        if self.chk_always_visible.isChecked():
+        if not self._current_request_silent and self.chk_always_visible.isChecked():
             self.force_bring_to_foreground()
 
         self.progress_timer.start()
 
     def on_synth_error(self, err_msg: str):
         self.stop_all(reset_progress=True)
-        if self.chk_always_visible.isChecked() or self.isVisible():
+        if not self._current_request_silent and (self.chk_always_visible.isChecked() or self.isVisible()):
             QMessageBox.warning(
                 self, "Synthesis Error", f"Speech synthesis error:\n{err_msg}"
+            )
+        elif hasattr(self, "tray_icon") and self.tray_icon:
+            self.tray_icon.showMessage(
+                "Kokoro TTS Synthesis Error",
+                err_msg,
+                QSystemTrayIcon.Warning,
+                3000,
             )
 
     def toggle_stop_or_resume(self):
@@ -1885,6 +1924,7 @@ class CyberTtsPlayer(QWidget):
             self.play_audio(
                 target_loops=self.get_loop_count_from_index(idx),
                 progressive=self.is_progressive_index(idx),
+                silent=False,
             )
 
     def stop_all(self, reset_progress: bool = True):

@@ -32,6 +32,11 @@ from kokoro_studio.main_window import CyberTtsPlayer
 
 
 def main():
+    silent_boot = any(
+        arg.strip().lower() in ("--silent", "-s", "--no-show")
+        for arg in sys.argv[1:]
+    )
+
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
 
@@ -50,26 +55,28 @@ def main():
         if global_mutex:
             kernel32.CloseHandle(global_mutex)
 
-        socket = QLocalSocket()
-        socket.connectToServer(SINGLE_INSTANCE_KEY)
-        if socket.waitForConnected(800):
-            socket.write(b"ACTIVATE")
-            socket.waitForBytesWritten(1000)
-            socket.disconnectFromServer()
+        if not silent_boot:
+            socket = QLocalSocket()
+            socket.connectToServer(SINGLE_INSTANCE_KEY)
+            if socket.waitForConnected(800):
+                socket.write(b"ACTIVATE")
+                socket.waitForBytesWritten(1000)
+                socket.disconnectFromServer()
         sys.exit(0)
 
-    player = CyberTtsPlayer(mutex_handle=global_mutex)
+    player = CyberTtsPlayer(mutex_handle=global_mutex, silent_start=silent_boot)
     app.aboutToQuit.connect(player.cleanup_resources)
 
-    if player.chk_always_visible.isChecked():
-        player.show()
-    else:
-        player.tray_icon.showMessage(
-            "Kokoro TTS Ready",
-            "Running in background. Click tray icon anytime to show window.",
-            QSystemTrayIcon.Information,
-            2500,
-        )
+    if not silent_boot:
+        if player.chk_always_visible.isChecked():
+            player.show()
+        else:
+            player.tray_icon.showMessage(
+                "Kokoro TTS Ready",
+                "Running in background. Click tray icon anytime to show window.",
+                QSystemTrayIcon.Information,
+                2500,
+            )
 
     sys.exit(app.exec_())
 
